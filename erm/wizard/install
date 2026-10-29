@@ -1,0 +1,179 @@
+[
+  {
+    "stepTitle": "EasyNVR 录像监控 · 录像目录",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "填写 EasyNVR 的录像根目录绝对路径（例如 /vol1/1000/easynvr/record）。装好之后还需要两步：① 打开应用填写/确认配置；② 到「应用中心 → 本应用 → 设置 → 授权目录」把该目录加为可读，否则应用读不到录像文件。若录像在外接盘（U 盘/SD 卡），还要到飞牛「文件管理 → 设置 → 外接存储权限」选「所有账户可见」。"
+      },
+      {
+        "type": "text",
+        "field": "wizard_record_root",
+        "label": "录像根目录（绝对路径）",
+        "initValue": "",
+        "rules": [
+          {
+            "required": true,
+            "message": "请填写录像根目录的绝对路径"
+          },
+          {
+            "pattern": "^/",
+            "message": "必须是绝对路径（以 / 开头）"
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "field": "wizard_monitor_channels",
+        "label": "监控通道（逗号分隔，支持 stream_* 通配；留空则自动发现）",
+        "initValue": ""
+      },
+      {
+        "type": "text",
+        "field": "wizard_channel_include",
+        "label": "自动发现规则（通道留空时生效）",
+        "initValue": "stream_*"
+      }
+    ]
+  },
+  {
+    "stepTitle": "推送渠道",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "钉钉机器人若用「加签」安全设置，必须同时填写加签密钥，否则会被钉钉拒收（errcode 310000）；用「自定义关键词」时密钥留空即可。"
+      },
+      {
+        "type": "select",
+        "field": "wizard_push_dingtalk",
+        "label": "启用钉钉",
+        "initValue": "启用",
+        "options": [
+          {
+            "label": "启用",
+            "value": "启用"
+          },
+          {
+            "label": "停用",
+            "value": "停用"
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "field": "wizard_dingtalk_webhook",
+        "label": "钉钉 Webhook",
+        "initValue": ""
+      },
+      {
+        "type": "text",
+        "field": "wizard_dingtalk_secret",
+        "label": "钉钉加签密钥（用「加签」时必填）",
+        "initValue": ""
+      },
+      {
+        "type": "select",
+        "field": "wizard_push_wechat",
+        "label": "启用企业微信",
+        "initValue": "停用",
+        "options": [
+          {
+            "label": "启用",
+            "value": "启用"
+          },
+          {
+            "label": "停用",
+            "value": "停用"
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "field": "wizard_wechat_webhook",
+        "label": "企业微信 Webhook",
+        "initValue": ""
+      },
+      {
+        "type": "select",
+        "field": "wizard_push_feishu",
+        "label": "启用飞书",
+        "initValue": "停用",
+        "options": [
+          {
+            "label": "启用",
+            "value": "启用"
+          },
+          {
+            "label": "停用",
+            "value": "停用"
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "field": "wizard_feishu_webhook",
+        "label": "飞书 Webhook",
+        "initValue": ""
+      }
+    ]
+  },
+  {
+    "stepTitle": "检测参数",
+    "items": [
+      {
+        "type": "text",
+        "field": "wizard_scan_interval",
+        "label": "扫描间隔（秒，≥30）",
+        "initValue": "300",
+        "rules": [
+          {
+            "pattern": "^[0-9]+$",
+            "message": "只能填数字（秒）"
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "field": "wizard_alert_threshold_minutes",
+        "label": "告警阈值（分钟无新增录像）",
+        "initValue": "60",
+        "rules": [
+          {
+            "pattern": "^[0-9]+$",
+            "message": "只能填数字（分钟）"
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "field": "wizard_alert_silence_minutes",
+        "label": "同一异常重复提醒间隔（分钟，0=只提醒一次）",
+        "initValue": "120",
+        "rules": [
+          {
+            "pattern": "^[0-9]+$",
+            "message": "只能填数字（分钟）"
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "field": "wizard_daily_report_time",
+        "label": "每日统计推送时间（HH:MM）",
+        "initValue": "08:00",
+        "rules": [
+          {
+            "pattern": "^([01]?[0-9]|2[0-3]):[0-5][0-9]$",
+            "message": "格式应为 HH:MM，例如 08:00"
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "field": "wizard_timezone",
+        "label": "时区",
+        "initValue": "Asia/Shanghai"
+      }
+    ]
+  }
+]

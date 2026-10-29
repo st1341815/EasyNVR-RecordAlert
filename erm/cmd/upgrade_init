@@ -1,0 +1,7 @@
+#!/bin/bash
+# 升级前：先停服务（target 会被整体替换）。
+DEST="${TRIM_APPDEST:-/var/apps/erm/target}"
+MAIN="/var/apps/erm/cmd/main"
+[ -x "${MAIN}" ] || MAIN="${DEST%/}/cmd/main"
+[ -x "${MAIN}" ] && "${MAIN}" stop
+exit 0

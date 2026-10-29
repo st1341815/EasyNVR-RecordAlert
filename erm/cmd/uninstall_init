@@ -1,0 +1,7 @@
+#!/bin/bash
+# 卸载前：停服务，别留孤儿进程。
+DEST="${TRIM_APPDEST:-/var/apps/erm/target}"
+MAIN="/var/apps/erm/cmd/main"
+[ -x "${MAIN}" ] || MAIN="${DEST%/}/cmd/main"
+[ -x "${MAIN}" ] && "${MAIN}" stop
+exit 0

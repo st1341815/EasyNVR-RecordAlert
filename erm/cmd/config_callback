@@ -1,0 +1,29 @@
+#!/bin/bash
+# 设置页保存后：用新的 wizard_* 重写 config.json，然后重启让一切从头开始算。
+#
+# 注意：状态页里「保存配置」走的是应用内 API，改完即时生效、不重启；
+# 这里处理的是「应用中心 → 设置」这条路径（飞牛把设置项以环境变量传进来）。
+
+APP_NAME="erm"
+DEST="${TRIM_APPDEST:-/var/apps/${APP_NAME}/target}"
+VAR="${TRIM_PKGVAR:-/var/apps/${APP_NAME}/var}"
+LOG_FILE="${VAR}/config_callback.log"
+mkdir -p "${VAR}/logs" 2>/dev/null
+exec >>"${LOG_FILE}" 2>&1
+
+echo "===== config_callback 开始 $(date) ====="
+echo "wizard_record_root=${wizard_record_root:-（未提供）}"
+
+PYB="$(command -v python3 2>/dev/null)"
+if [ -n "${PYB}" ] && [ -f "${DEST}/scripts/apply_wizard.py" ]; then
+    SUMMARY="$("${PYB}" "${DEST}/scripts/apply_wizard.py" "${VAR}/config.json" 2>>"${LOG_FILE}")"
+    echo "apply_wizard: ${SUMMARY}"
+    chmod 600 "${VAR}/config.json" 2>/dev/null
+fi
+
+MAIN="/var/apps/${APP_NAME}/cmd/main"
+[ -x "${MAIN}" ] || MAIN="${DEST%/}/cmd/main"
+[ -x "${MAIN}" ] && "${MAIN}" restart
+
+echo "===== config_callback 结束 $(date) ====="
+exit 0

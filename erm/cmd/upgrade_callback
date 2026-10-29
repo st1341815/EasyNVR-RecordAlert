@@ -1,0 +1,10 @@
+#!/bin/bash
+# 升级后：补可执行位（target 被整体替换后权限可能丢），再启动。
+DEST="${TRIM_APPDEST:-/var/apps/erm/target}"
+chmod +x "${DEST}/server.py" "${DEST}/monitor.py" 2>/dev/null
+chmod +x "${DEST}/scripts/"*.py 2>/dev/null
+
+MAIN="/var/apps/erm/cmd/main"
+[ -x "${MAIN}" ] || MAIN="${DEST%/}/cmd/main"
+[ -x "${MAIN}" ] && "${MAIN}" start
+exit 0

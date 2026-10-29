@@ -1,0 +1,49 @@
+#!/bin/bash
+# 安装完成：把向导值写进 config.json（$TRIM_PKGVAR），做权限与自检，然后启动。
+
+APP_NAME="erm"
+DEST="${TRIM_APPDEST:-/var/apps/${APP_NAME}/target}"
+VAR="${TRIM_PKGVAR:-/var/apps/${APP_NAME}/var}"
+LOG_FILE="${VAR}/install_callback.log"
+mkdir -p "${VAR}/logs" 2>/dev/null
+exec >>"${LOG_FILE}" 2>&1
+
+echo "===== install_callback 开始 $(date) ====="
+echo "TRIM_APPDEST=${TRIM_APPDEST:-} TRIM_PKGVAR=${TRIM_PKGVAR:-} TRIM_RUN_USERNAME=${TRIM_RUN_USERNAME:-}"
+echo "wizard_record_root=${wizard_record_root:-（未提供）}"
+
+# 可执行位保险（打好的包本来就带，但升级/手工替换后可能丢）
+chmod +x "${DEST}/server.py" "${DEST}/monitor.py" 2>/dev/null
+chmod +x "${DEST}/scripts/"*.py 2>/dev/null
+
+PYB="$(command -v python3 2>/dev/null)"
+[ -z "${PYB}" ] && PYB="$(command -v python 2>/dev/null)"
+if [ -z "${PYB}" ]; then
+    echo "缺少 python3，放弃配置生成"
+    [ -n "${TRIM_TEMP_LOGFILE:-}" ] && \
+        printf '%s\n' "未找到 python3，EasyNVR 录像监控 无法运行。" > "${TRIM_TEMP_LOGFILE}"
+    exit 1
+fi
+printf '%s' "${PYB}" > "${VAR}/python_path"
+
+# 向导值 → config.json（唯一真源：config.py 的 normalize + 原子写）
+SUMMARY="$("${PYB}" "${DEST}/scripts/apply_wizard.py" "${VAR}/config.json" 2>>"${LOG_FILE}")"
+echo "apply_wizard: ${SUMMARY}"
+chmod 600 "${VAR}/config.json" 2>/dev/null
+
+# 把要点回显到应用中心（只写 TRIM_TEMP_LOGFILE 用户才看得到）
+if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then
+    {
+        echo "EasyNVR 录像监控 安装完成。"
+        echo "录像目录：${wizard_record_root:-（未填写，请打开应用填写）}"
+        echo "下一步：到「应用中心 → 本应用 → 设置 → 授权目录」把录像目录加为可读，然后重启应用。"
+    } > "${TRIM_TEMP_LOGFILE}"
+fi
+
+# 主动启动（幂等；飞牛随后也会调 cmd/main start）
+MAIN="/var/apps/${APP_NAME}/cmd/main"
+[ -x "${MAIN}" ] || MAIN="${DEST%/}/cmd/main"
+[ -x "${MAIN}" ] && "${MAIN}" start
+
+echo "===== install_callback 结束 $(date) rc=0 ====="
+exit 0

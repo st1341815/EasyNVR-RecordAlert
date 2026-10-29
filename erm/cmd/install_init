@@ -1,0 +1,18 @@
+#!/bin/bash
+# 安装前检查：本应用只用 Python 标准库，但必须有 python3。
+
+VAR="${TRIM_PKGVAR:-/var/apps/erm/var}"
+mkdir -p "${VAR}" 2>/dev/null
+
+PYB="$(command -v python3 2>/dev/null || command -v python 2>/dev/null)"
+if [ -n "${PYB}" ]; then
+    printf '%s' "${PYB}" > "${VAR}/python_path"
+    exit 0
+fi
+
+MSG="未找到 python3，EasyNVR 录像监控 无法运行。请确认 fnOS 运行环境已安装 Python3。"
+if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then
+    printf '%s\n' "${MSG}" > "${TRIM_TEMP_LOGFILE}"
+fi
+echo "${MSG}" >&2
+exit 1

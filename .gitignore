@@ -1,0 +1,14 @@
+# 构建产物与本地临时文件
+dist/
+*.fpk
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 本地调试/凭据
+.env
+*.log
+/tmp/

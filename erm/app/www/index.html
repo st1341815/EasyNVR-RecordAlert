@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EasyNVR 录像监控</title>
+<style>
+  :root{
+    --bg:#f6f4ef; --card:#fffdf9; --ink:#23262b; --muted:#6b7280;
+    --line:#e3ded4; --brand:#3f6f5f; --brand-soft:#e9f0ec;
+    --warn:#8a5a00; --warn-bg:#fdf3dd; --danger:#a33a2e; --danger-bg:#fbebe8;
+    --ok:#2f6b46; --ok-bg:#e8f2eb; --radius:10px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:960px;margin:0 auto;padding:20px 18px 48px}
+  header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+  h1{font-size:18px;font-weight:650;margin:0;letter-spacing:.2px}
+  .ver{font-size:12px;color:var(--muted)}
+  .pill{font-size:12px;padding:2px 9px;border-radius:999px;border:1px solid var(--line);
+        background:#fff;color:var(--muted)}
+  .pill.ok{background:var(--ok-bg);color:var(--ok);border-color:#cfe2d6}
+  .pill.bad{background:var(--danger-bg);color:var(--danger);border-color:#efd2cd}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+        padding:16px;margin-bottom:14px}
+  .card h2{font-size:13px;font-weight:650;margin:0 0 12px;color:var(--muted);
+           letter-spacing:.6px;text-transform:uppercase}
+  .meta{display:flex;gap:18px;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}
+  .meta b{color:var(--ink);font-weight:600}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  button{font:inherit;padding:7px 14px;border-radius:8px;border:1px solid var(--line);
+         background:#fff;color:var(--ink);cursor:pointer}
+  button:hover{background:#f3f0e9}
+  button.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+  button.primary:hover{filter:brightness(1.06)}
+  button:disabled{opacity:.55;cursor:default}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{font-size:12px;color:var(--muted);font-weight:600;text-align:left;
+     padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:8px;border-bottom:1px solid #f0ece3;white-space:nowrap}
+  td.num{font-variant-numeric:tabular-nums}
+  .tag{font-size:12px;padding:1px 8px;border-radius:999px}
+  .tag.ok{background:var(--ok-bg);color:var(--ok)}
+  .tag.bad{background:var(--danger-bg);color:var(--danger)}
+  .tag.mid{background:var(--warn-bg);color:var(--warn)}
+  .empty{color:var(--muted);font-size:13px;padding:8px 0}
+  form .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+  label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:4px}
+  input[type=text],input[type=number],input[type=time],select,textarea{
+    width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:8px;
+    background:#fff;color:var(--ink);font:inherit}
+  input:focus{outline:2px solid var(--brand-soft);border-color:var(--brand)}
+  .checks{display:flex;gap:16px;flex-wrap:wrap;margin-top:6px}
+  .checks label{display:flex;align-items:center;gap:6px;margin:0;color:var(--ink);font-size:13px}
+  .hint{font-size:12px;color:var(--muted);margin-top:6px}
+  .msg{margin-top:10px;font-size:13px;padding:9px 11px;border-radius:8px;
+       border:1px solid var(--line);background:#fff;white-space:pre-wrap;display:none}
+  .msg.show{display:block}
+  .msg.ok{background:var(--ok-bg);border-color:#cfe2d6;color:var(--ok)}
+  .msg.bad{background:var(--danger-bg);border-color:#efd2cd;color:var(--danger)}
+  .msg.warn{background:var(--warn-bg);border-color:#eeddb4;color:var(--warn)}
+  pre{background:#26292e;color:#e6e3dc;padding:12px;border-radius:8px;overflow:auto;
+      font-size:12px;line-height:1.5;max-height:340px;margin:0}
+  details summary{cursor:pointer;font-size:13px;color:var(--muted);font-weight:600}
+  .flex-between{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>EasyNVR 录像监控</h1>
+    <span class="ver" id="ver">v—</span>
+    <span class="pill" id="statePill">加载中…</span>
+  </header>
+
+  <div class="card">
+    <div class="meta">
+      <span>录像目录 <b id="mRoot">—</b></span>
+      <span>上次检测 <b id="mLast">—</b></span>
+      <span>下次检测 <b id="mNext">—</b></span>
+      <span>下次日报 <b id="mNextDaily">—</b></span>
+      <span>通道布局 <b id="mLayout">—</b></span>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button class="primary" id="btnScan">立即检测</button>
+      <button id="btnTest">测试推送</button>
+      <button id="btnDaily">补发昨日日报</button>
+      <button id="btnLogs">查看日志</button>
+      <button id="btnDoctor">一键自检</button>
+    </div>
+    <div class="msg" id="msg"></div>
+  </div>
+
+  <div class="card">
+    <h2>通道状态</h2>
+    <div id="chanBox"><div class="empty">尚未检测</div></div>
+    <div class="hint" id="rootErr"></div>
+  </div>
+
+  <div class="card">
+    <h2>配置</h2>
+    <form id="cfgForm" onsubmit="return false">
+      <div class="grid">
+        <div>
+          <label>录像目录（绝对路径）</label>
+          <input type="text" id="record_root" placeholder="/vol1/1000/easynvr/record">
+        </div>
+        <div>
+          <label>通道（逗号分隔，支持 stream_* 通配；留空用下面的规则）</label>
+          <input type="text" id="monitor_channels" placeholder="stream_1,stream_2 或 channel_*">
+        </div>
+        <div>
+          <label>通道布局</label>
+          <select id="channel_layout">
+            <option value="auto">自动识别（推荐）</option>
+            <option value="camera">摄像头聚合（一个摄像头=一个通道）</option>
+            <option value="profile">按 profile 分开（主/子码流各算一个）</option>
+            <option value="flat">单层目录（stream_* 规则）</option>
+          </select>
+        </div>
+        <div>
+          <label>单层目录的自动发现规则（布局=单层时生效）</label>
+          <input type="text" id="channel_include" placeholder="stream_*">
+        </div>
+        <div>
+          <label>扫描间隔（秒，≥30）</label>
+          <input type="number" id="scan_interval" min="30" step="30">
+        </div>
+        <div>
+          <label>告警阈值（分钟无新录像）</label>
+          <input type="number" id="alert_threshold_minutes" min="1">
+        </div>
+        <div>
+          <label>同一异常重复提醒间隔（分钟，0=只提醒一次）</label>
+          <input type="number" id="alert_silence_minutes" min="0">
+        </div>
+        <div>
+          <label>每日统计推送时间</label>
+          <input type="time" id="daily_report_time">
+        </div>
+        <div>
+          <label>时区</label>
+          <input type="text" id="timezone" placeholder="Asia/Shanghai">
+        </div>
+      </div>
+
+      <div style="margin-top:14px">
+        <label>摄像头别名（每行一条：<code>摄像头ID=名称</code>，也可写 <code>ID/profile_1=名称</code>；别名只影响显示与告警文案）</label>
+        <textarea id="channel_aliases" rows="3" placeholder="O27fqV6dYvs3T=大门&#10;Xk91mQ2pLzT0=后院"></textarea>
+      </div>
+
+      <div style="margin-top:14px">
+        <label>推送渠道</label>
+        <div class="checks">
+          <label><input type="checkbox" id="ch_dingtalk"> 钉钉</label>
+          <label><input type="checkbox" id="ch_feishu"> 飞书</label>
+          <label><input type="checkbox" id="ch_wechat"> 企业微信</label>
+          <label><input type="checkbox" id="notify_recovery"> 恢复时补发通知</label>
+        </div>
+      </div>
+
+      <div class="grid" style="margin-top:12px">
+        <div><label>钉钉 Webhook</label><input type="text" id="dingtalk_webhook" placeholder="https://oapi.dingtalk.com/robot/send?access_token=…"></div>
+        <div><label>钉钉加签密钥（用「加签」安全设置时填）</label><input type="text" id="dingtalk_secret" placeholder="SEC…"></div>
+        <div><label>飞书 Webhook</label><input type="text" id="feishu_webhook" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/…"></div>
+        <div><label>企业微信 Webhook</label><input type="text" id="wechat_webhook" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…"></div>
+      </div>
+
+      <div class="row" style="margin-top:16px">
+        <button class="primary" id="btnSave">保存配置</button>
+        <span class="hint" style="margin:0">保存后立即生效，无需重启应用</span>
+      </div>
+      <div class="msg" id="saveMsg"></div>
+    </form>
+  </div>
+
+  <div class="card" id="doctorCard" style="display:none">
+    <h2>自检</h2>
+    <div id="doctorBox"></div>
+  </div>
+
+  <div class="card" id="logCard" style="display:none">
+    <div class="flex-between" style="margin-bottom:10px">
+      <h2 style="margin:0">运行日志</h2>
+      <button id="btnLogRefresh">刷新</button>
+    </div>
+    <pre id="logBox">—</pre>
+  </div>
+</div>
+
+<script>
+const API = '/app/erm/api';
+const $ = id => document.getElementById(id);
+
+async function call(action, extra) {
+  const r = await fetch(API, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(Object.assign({action}, extra || {}))
+  });
+  let j;
+  try { j = await r.json(); } catch (e) { throw new Error('接口返回异常 HTTP ' + r.status); }
+  if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+  return j;
+}
+
+function esc(s){
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  })[c]);
+}
+
+function showMsg(el, text, kind){
+  el.className = 'msg show ' + (kind || '');
+  el.textContent = text;
+}
+
+function tagFor(ch){
+  if (ch.status === 'ok') return '<span class="tag ok">正常</span>';
+  if (ch.status === 'silent') return '<span class="tag mid">无新录像</span>';
+  return '<span class="tag bad">' + esc(ch.label || ch.status) + '</span>';
+}
+
+function renderChannels(d){
+  const box = $('chanBox');
+  const chans = d.channels || [];
+  if (!chans.length) {
+    box.innerHTML = '<div class="empty">还没有通道数据' +
+      (d.error ? '：' + esc(d.error) : '，点「立即检测」试试') + '</div>';
+    return;
+  }
+  let html = '<table><thead><tr><th>通道</th><th>目录</th><th>状态</th><th>最新录像</th>' +
+             '<th>已闲置</th><th>文件数</th></tr></thead><tbody>';
+  for (const c of chans) {
+    const same = !c.label || c.label === c.channel;
+    html += '<tr><td>' + esc(same ? c.channel : c.label) + '</td>' +
+            '<td class="num">' + (same ? '—' : esc(c.channel)) + '</td>' +
+            '<td>' + tagFor(c) + '</td>' +
+            '<td class="num">' + esc(c.latest_str) + '</td>' +
+            '<td class="num">' + (c.idle_min == null ? '—' : c.idle_min + ' 分钟') + '</td>' +
+            '<td class="num">' + (c.files || 0) + '</td></tr>';
+  }
+  box.innerHTML = html + '</tbody></table>';
+}
+
+function fillConfig(cfg){
+  const set = (id, v) => { const el = $(id); if (el) el.value = v == null ? '' : v; };
+  set('record_root', cfg.record_root);
+  set('monitor_channels', (cfg.monitor_channels || []).join(','));
+  set('channel_include', cfg.channel_include);
+  set('channel_layout', cfg.channel_layout || 'auto');
+  set('channel_aliases', Object.keys(cfg.channel_aliases || {})
+      .map(k => k + '=' + cfg.channel_aliases[k]).join('\n'));
+  set('scan_interval', cfg.scan_interval);
+  set('alert_threshold_minutes', cfg.alert_threshold_minutes);
+  set('alert_silence_minutes', cfg.alert_silence_minutes);
+  set('daily_report_time', cfg.daily_report_time);
+  set('timezone', cfg.timezone);
+  set('dingtalk_webhook', cfg.dingtalk_webhook);
+  set('dingtalk_secret', cfg.dingtalk_secret);
+  set('feishu_webhook', cfg.feishu_webhook);
+  set('wechat_webhook', cfg.wechat_webhook);
+  const on = cfg.enabled_push_channels || [];
+  $('ch_dingtalk').checked = on.includes('dingtalk');
+  $('ch_feishu').checked = on.includes('feishu');
+  $('ch_wechat').checked = on.includes('wechat');
+  $('notify_recovery').checked = !!cfg.notify_recovery;
+}
+
+function render(d){
+  $('ver').textContent = 'v' + (d.version || '—');
+  const pill = $('statePill');
+  const bad = d.alerting || (d.channels || []).some(c => c.alert);
+  pill.className = 'pill ' + (bad ? 'bad' : (d.channels || []).length ? 'ok' : '');
+  pill.textContent = bad ? (d.alerting + ' 个通道异常') :
+                     ((d.channels || []).length ? '全部正常' : '等待检测');
+  $('mRoot').textContent = d.root || '—';
+  $('mLast').textContent = d.last_check_str || '—';
+  $('mNext').textContent = d.next_scan_sec > 0 ? ('约 ' + d.next_scan_sec + ' 秒后') : '即将进行';
+  $('mNextDaily').textContent = d.next_daily_str || '—';
+  const LAY = {camera:'摄像头聚合', profile:'按 profile 分开', flat:'单层目录', auto:'自动'};
+  $('mLayout').textContent = (LAY[d.layout] || d.layout || '—') + '·' + (d.channel_count || 0) + ' 个通道';
+  $('rootErr').textContent = d.error ? ('⚠ ' + d.error) : '';
+  renderChannels(d);
+  if (d.config) fillConfig(d.config);
+}
+
+async function load(){
+  try {
+    render(await call('status'));
+  } catch (e) {
+    showMsg($('msg'), '加载状态失败：' + e.message, 'bad');
+  }
+}
+
+async function act(btn, action, extra, okText){
+  btn.disabled = true;
+  try {
+    const d = await call(action, extra);
+    render(d);
+    if (action === 'scan') {
+      const pushed = (d.pushed || []).map(p =>
+        (p.label || p.channel) + (p.ok ? ' 成功' : ' 失败：' + p.detail)).join('；');
+      showMsg($('msg'), okText + (pushed ? '\n推送：' + pushed : '（本轮无告警，未推送）'),
+              d.alerting ? 'warn' : 'ok');
+    }
+    return d;
+  } catch (e) {
+    showMsg($('msg'), okText + ' 失败：' + e.message, 'bad');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+$('btnScan').onclick = () => act($('btnScan'), 'scan', {}, '检测完成');
+$('btnTest').onclick = async () => {
+  const btn = $('btnTest'); btn.disabled = true;
+  try {
+    const d = await call('test_push');
+    const lines = (d.results || []).map(r =>
+      (r.label || r.channel) + '：' + (r.ok ? '成功（' + (r.ms || 0) + 'ms）' : '失败 — ' + r.detail));
+    showMsg($('msg'), lines.join('\n') || '没有启用任何渠道', d.ok ? 'ok' : 'bad');
+  } catch (e) {
+    showMsg($('msg'), '测试推送失败：' + e.message, 'bad');
+  } finally { btn.disabled = false; }
+};
+$('btnDaily').onclick = async () => {
+  const btn = $('btnDaily'); btn.disabled = true;
+  try {
+    const d = await call('daily_now');
+    const pushed = (d.pushed || []).map(p => (p.label || p.channel) +
+      (p.ok ? ' 成功' : ' 失败：' + p.detail)).join('；');
+    showMsg($('msg'), '昨日日报：\n' + d.message + '\n\n推送：' + (pushed || '无'), 'ok');
+  } catch (e) {
+    showMsg($('msg'), '补发失败：' + e.message, 'bad');
+  } finally { btn.disabled = false; }
+};
+
+$('btnSave').onclick = async () => {
+  const cfg = {
+    record_root: $('record_root').value.trim(),
+    monitor_channels: $('monitor_channels').value,
+    channel_include: $('channel_include').value.trim() || 'stream_*',
+    channel_layout: $('channel_layout').value,
+    channel_aliases: $('channel_aliases').value,
+    scan_interval: $('scan_interval').value,
+    alert_threshold_minutes: $('alert_threshold_minutes').value,
+    alert_silence_minutes: $('alert_silence_minutes').value,
+    daily_report_time: $('daily_report_time').value,
+    timezone: $('timezone').value.trim() || 'Asia/Shanghai',
+    enabled_push_channels: ['dingtalk','feishu','wechat'].filter(k => $('ch_' + k).checked),
+    notify_recovery: $('notify_recovery').checked,
+    dingtalk_webhook: $('dingtalk_webhook').value.trim(),
+    dingtalk_secret: $('dingtalk_secret').value.trim(),
+    feishu_webhook: $('feishu_webhook').value.trim(),
+    wechat_webhook: $('wechat_webhook').value.trim()
+  };
+  const btn = $('btnSave'); btn.disabled = true;
+  try {
+    const d = await call('save_config', {config: cfg});
+    render(d);
+    const w = (d.warnings || []);
+    showMsg($('saveMsg'), '已保存。' + (w.length ? '\n注意：\n· ' + w.join('\n· ') : ''), w.length ? 'warn' : 'ok');
+  } catch (e) {
+    showMsg($('saveMsg'), '保存失败：' + e.message, 'bad');
+  } finally { btn.disabled = false; }
+};
+
+async function loadLogs(){
+  $('logCard').style.display = 'block';
+  try {
+    const d = await call('logs', {lines: 200});
+    $('logBox').textContent = d.text || '（空）';
+  } catch (e) {
+    $('logBox').textContent = '读取失败：' + e.message;
+  }
+}
+$('btnLogs').onclick = loadLogs;
+$('btnLogRefresh').onclick = loadLogs;
+
+$('btnDoctor').onclick = async () => {
+  const btn = $('btnDoctor'); btn.disabled = true;
+  try {
+    const d = await call('doctor');
+    let html = '<table><tbody>';
+    for (const c of (d.checks || [])) {
+      html += '<tr><td>' + (c.ok ? '✅' : '⚠️') + ' ' + esc(c.item) + '</td><td>' +
+              esc(c.detail || '') + '</td></tr>';
+    }
+    $('doctorBox').innerHTML = html + '</tbody></table>';
+    $('doctorCard').style.display = 'block';
+  } catch (e) {
+    showMsg($('msg'), '自检失败：' + e.message, 'bad');
+  } finally { btn.disabled = false; }
+};
+
+load();
+setInterval(load, 15000);
+</script>
+</body>
+</html>

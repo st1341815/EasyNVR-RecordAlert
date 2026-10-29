@@ -1,0 +1,142 @@
+#!/bin/bash
+# EasyNVR 录像监控 —— 运行控制
+#
+# 本应用是 fnOS 统一网关微应用（micro_app）：一个常驻进程（server.py）
+# 同时提供 Unix Socket 网关与监控线程，所以这里只管一个 pid。
+#
+# 返回值约定（飞牛按返回码判定状态，不是看输出文字）：
+#   status → exit 0 = 运行中；exit 3 = 未运行
+
+APP_NAME="erm"
+DEST="${TRIM_APPDEST:-/var/apps/${APP_NAME}/target}"
+VAR="${TRIM_PKGVAR:-/var/apps/${APP_NAME}/var}"
+PID_FILE="${VAR}/${APP_NAME}.pid"
+SOCK="${DEST}/${APP_NAME}.sock"
+OUT_DIR="${VAR}/logs"
+OUT_FILE="${OUT_DIR}/launcher.log"
+SERVER="${DEST}/server.py"
+
+mkdir -p "${OUT_DIR}" 2>/dev/null
+
+pybin() {
+    if [ -f "${VAR}/python_path" ]; then
+        local p
+        p="$(head -n 1 "${VAR}/python_path" 2>/dev/null | tr -d '[:space:]')"
+        [ -n "${p}" ] && [ -x "${p}" ] && { printf '%s' "${p}"; return 0; }
+    fi
+    if [ -x "${VAR}/venv/bin/python3" ]; then
+        printf '%s' "${VAR}/venv/bin/python3"; return 0
+    fi
+    command -v python3 2>/dev/null || command -v python 2>/dev/null
+}
+
+pid_of() {
+    head -n 1 "${PID_FILE}" 2>/dev/null | tr -d '[:space:]'
+}
+
+is_running() {
+    [ -f "${PID_FILE}" ] || return 1
+    local pid
+    pid="$(pid_of)"
+    [ -n "${pid}" ] || return 1
+    kill -0 "${pid}" 2>/dev/null
+}
+
+do_start() {
+    if is_running; then
+        return 0
+    fi
+    rm -f "${PID_FILE}"
+
+    if [ ! -f "${SERVER}" ]; then
+        echo "$(date '+%F %T') 找不到 ${SERVER}" >> "${OUT_FILE}"
+        return 1
+    fi
+
+    local PY
+    PY="$(pybin)"
+    if [ -z "${PY}" ]; then
+        echo "$(date '+%F %T') 运行环境缺少 python3" >> "${OUT_FILE}"
+        [ -n "${TRIM_TEMP_LOGFILE:-}" ] && \
+            printf '%s\n' "未找到 python3，EasyNVR 录像监控 无法运行。" > "${TRIM_TEMP_LOGFILE}"
+        return 1
+    fi
+
+    echo "$(date '+%F %T') 启动：${PY} ${SERVER}" >> "${OUT_FILE}"
+    nohup "${PY}" -X utf8 "${SERVER}" >> "${OUT_FILE}" 2>&1 &
+    echo "$!" > "${PID_FILE}"
+
+    # 等 socket 就绪（最多 10 秒）
+    local i=0
+    while [ "${i}" -lt 20 ]; do
+        if [ -S "${SOCK}" ] && is_running; then
+            return 0
+        fi
+        sleep 0.5
+        i=$((i + 1))
+    done
+    echo "$(date '+%F %T') 启动超时（socket 未就绪），见 ${OUT_FILE}" >> "${OUT_FILE}"
+    return 1
+}
+
+do_stop() {
+    # pid 文件丢了也要能停：按脚本路径兜底清理残留实例
+    # （升级替换 target、被 SIGKILL 之后，pid 文件会失效，残留进程会和新进程抢着发通知）
+    if [ -f "${SERVER}" ]; then
+        for p in $(pgrep -f "python3 .*${SERVER}" 2>/dev/null); do
+            [ "${p}" = "$$" ] && continue
+            kill -TERM "${p}" 2>/dev/null
+        done
+        sleep 1
+        for p in $(pgrep -f "python3 .*${SERVER}" 2>/dev/null); do
+            kill -KILL "${p}" 2>/dev/null
+        done
+    fi
+
+    if is_running; then
+        local pid
+        pid="$(pid_of)"
+        kill -TERM "${pid}" 2>/dev/null
+        local i=0
+        while kill -0 "${pid}" 2>/dev/null && [ "${i}" -lt 20 ]; do
+            sleep 0.5
+            i=$((i + 1))
+        done
+        if kill -0 "${pid}" 2>/dev/null; then
+            kill -KILL "${pid}" 2>/dev/null
+            sleep 1
+        fi
+    fi
+    rm -f "${PID_FILE}"
+    rm -f "${SOCK}"
+    return 0
+}
+
+case "${1:-}" in
+    start)
+        do_start && exit 0 || exit 1
+        ;;
+    stop)
+        do_stop
+        exit 0
+        ;;
+    restart)
+        do_stop
+        sleep 1
+        do_start && exit 0 || exit 1
+        ;;
+    status)
+        if is_running && [ -S "${SOCK}" ]; then
+            exit 0          # 运行中
+        fi
+        # pid 在但进程没了：顺手清理，避免"假运行"
+        if [ -f "${PID_FILE}" ] && ! is_running; then
+            rm -f "${PID_FILE}"
+        fi
+        exit 3              # 未运行
+        ;;
+    *)
+        echo "usage: $0 {start|stop|restart|status}" >&2
+        exit 1
+        ;;
+esac

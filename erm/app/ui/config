@@ -1,0 +1,16 @@
+{
+  ".url": {
+    "erm.Application": {
+      "title": "EasyNVR 录像监控",
+      "icon": "images/icon_{0}.png",
+      "type": "iframe",
+      "protocol": "",
+      "gatewayPrefix": "/app/erm",
+      "gatewaySocket": "erm.sock",
+      "url": "/app/erm",
+      "allUsers": true,
+      "width": 980,
+      "height": 760
+    }
+  }
+}

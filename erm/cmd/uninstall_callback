@@ -1,0 +1,6 @@
+#!/bin/bash
+# 卸载后：默认保留 $TRIM_PKGVAR（配置/状态/日志），重装后可直接沿用。
+# 想彻底清干净：手动删除 /volX/@appdata/erm。
+DEST="${TRIM_APPDEST:-/var/apps/erm/target}"
+rm -f "${DEST}/erm.sock" 2>/dev/null
+exit 0

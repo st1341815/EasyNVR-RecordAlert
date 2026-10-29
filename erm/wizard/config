@@ -1,0 +1,59 @@
+[
+  {
+    "stepTitle": "EasyNVR 录像监控 · 设置",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "这里的输入框是「覆盖值」，留空表示保持应用内已有配置不变。日常改配置推荐直接打开应用（应用中心 → 打开），里面能看到当前值、能立即测试推送，保存后无需重启。录像目录的读取权限请在本页下方的「授权目录」里添加（设为可读），改完授权需要重启应用。"
+      },
+      {
+        "type": "text",
+        "field": "wizard_record_root",
+        "label": "录像根目录（留空=不修改）",
+        "initValue": ""
+      },
+      {
+        "type": "text",
+        "field": "wizard_monitor_channels",
+        "label": "监控通道（逗号分隔，可写 stream_*；留空=不修改）",
+        "initValue": ""
+      },
+      {
+        "type": "text",
+        "field": "wizard_alert_threshold_minutes",
+        "label": "告警阈值（分钟，留空=不修改）",
+        "initValue": ""
+      },
+      {
+        "type": "text",
+        "field": "wizard_daily_report_time",
+        "label": "每日统计时间 HH:MM（留空=不修改）",
+        "initValue": ""
+      },
+      {
+        "type": "text",
+        "field": "wizard_dingtalk_webhook",
+        "label": "钉钉 Webhook（留空=不修改）",
+        "initValue": ""
+      },
+      {
+        "type": "text",
+        "field": "wizard_dingtalk_secret",
+        "label": "钉钉加签密钥（留空=不修改）",
+        "initValue": ""
+     },
+      {
+        "type": "text",
+        "field": "wizard_wechat_webhook",
+        "label": "企业微信 Webhook（留空=不修改）",
+        "initValue": ""
+      },
+      {
+        "type": "text",
+        "field": "wizard_feishu_webhook",
+        "label": "飞书 Webhook（留空=不修改）",
+        "initValue": ""
+      }
+    ]
+  }
+]

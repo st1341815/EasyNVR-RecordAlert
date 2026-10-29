@@ -90,6 +90,13 @@ bash gen_icons.py             # 只有换图标时才需要
 4. 建 Release，标题/附件名按上表；**附件改名只在上传时指定**，不动 `dist/erm.fpk`；
 5. 换附件名要"先传新名 → 回读比对 sha256 → 再删旧名"（GitHub 不支持重命名附件，中途失败会丢包）。
 
+> **`git push` 报 `gnutls_handshake() failed` 时**（`github.com` 的 git 通道偶发不通，
+> 但 `api.github.com` / `uploads.github.com` 正常）：别改代码，直接走 REST ——
+> 用 Git Data API 重放提交（`POST /git/blobs` → `POST /git/trees`（带 `base_tree`）→
+> `POST /git/commits`（同一份 message / author / committer / 时间）→ `PATCH /git/refs/heads/main`），
+> git 对象是内容确定的，重放出来的 sha 与本地逐个相同，推完 `git rev-parse` 两边一致；
+> Release 用 `POST /releases` + `POST <upload_url>?name=...` 照样能发。
+
 ## 4. 安装（本机 / 任意 fnOS）
 
 ```bash

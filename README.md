@@ -181,6 +181,13 @@ PYTHONPATH= python3 check_fnpack.py     # 期望 FNPCK_OK（31 项）
 6. **设置页字段「留空 = 不修改」**：飞牛设置页的 `initValue` 是静态的，拿不到当前配置；
    若把空值当"清空"，用户只在设置页点一下保存就会把录像目录和 webhook 抹掉。
 7. **配置热生效**：页面保存直接改内存配置 + 落盘，监控线程下一轮就用新值，不重启。
+8. **`manifest` 的值里绝对不能出现 ASCII 分号 `;`**：`fnpack` 用 INI 解析 manifest，
+   `;` 会被当成**行内注释起点** → 值在 `;` 处被截断，剩下半句变成一行注释写回包里。
+   v1.0.8 就踩过：desc 里写了 `&lt;摄像头ID&gt;`（HTML 实体本身就带 `;`），
+   打包后 desc 被切成两行、changelog 里 v1.0.7 及更早的整段历史被吃掉。
+   中文全角「；」没问题，只有半角 `;` 有坑；要用尖括号就直接写「摄像头ID/profile_N/日期/」。
+   验收方法：`tar xzf dist/erm.fpk -C /tmp/x && grep '^desc' /tmp/x/manifest`，
+   包内 desc/changelog 必须是完整单行。
 
 ## 7. 已知限制
 

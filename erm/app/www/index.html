@@ -64,6 +64,36 @@
       font-size:12px;line-height:1.5;max-height:340px;margin:0}
   details summary{cursor:pointer;font-size:13px;color:var(--muted);font-weight:600}
   .flex-between{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+  /* ---------- 手机端（≤640px） ---------- */
+  @media (max-width: 640px) {
+    .wrap{padding:14px 12px 40px}
+    h1{font-size:16px}
+    /* 兜底：任何宽内容都不许顶出屏幕 */
+    .card{overflow-x:auto;-webkit-overflow-scrolling:touch}
+    /* 通道表 → 一个通道一张小卡 */
+    table.chan{width:100%;border-collapse:collapse}
+    table.chan thead{display:none}
+    table.chan tr{display:block;padding:10px 2px 12px;border-bottom:1px solid #f0ece3}
+    table.chan tr:last-child{border-bottom:0}
+    table.chan td{display:flex;justify-content:space-between;align-items:baseline;gap:14px;
+                  padding:3px 0;border:0;white-space:normal;word-break:break-word;text-align:right}
+    table.chan td::before{content:attr(data-label);color:var(--muted);font-size:12.5px;
+                          flex:0 0 auto;text-align:left}
+    table.chan td[data-label=""]::before{content:none}
+    table.chan td.c-name{font-weight:650;font-size:14px;text-align:left;padding-bottom:6px}
+    table.chan td.c-name::before{content:none}
+    table.chan td.c-dir{color:var(--muted);font-size:12.5px}
+    /* 目录与通道相同时（无别名）手机上不占一行 */
+    table.chan td.c-dir:empty,.chan td.c-dir[data-same="1"]{display:none}
+    /* 表单与按钮 */
+    .grid{grid-template-columns:1fr !important}
+    input[type=text],input[type=number],input[type=time],select,textarea{font-size:16px}
+    button{padding:9px 14px}
+    .meta{gap:10px 16px;font-size:12px}
+    .meta b{display:inline}
+    pre{font-size:11.5px}
+  }
+
 </style>
 </head>
 <body>
@@ -230,16 +260,18 @@ function renderChannels(d){
       (d.error ? '：' + esc(d.error) : '，点「立即检测」试试') + '</div>';
     return;
   }
-  let html = '<table><thead><tr><th>通道</th><th>目录</th><th>状态</th><th>最新录像</th>' +
-             '<th>已闲置</th><th>文件数</th></tr></thead><tbody>';
+  let html = '<table class="chan"><thead><tr><th>通道</th><th>目录</th><th>状态</th>' +
+             '<th>最新录像</th><th>已闲置</th><th>文件数</th></tr></thead><tbody>';
   for (const c of chans) {
     const same = !c.label || c.label === c.channel;
-    html += '<tr><td>' + esc(same ? c.channel : c.label) + '</td>' +
-            '<td class="num">' + (same ? '—' : esc(c.channel)) + '</td>' +
-            '<td>' + tagFor(c) + '</td>' +
-            '<td class="num">' + esc(c.latest_str) + '</td>' +
-            '<td class="num">' + (c.idle_min == null ? '—' : c.idle_min + ' 分钟') + '</td>' +
-            '<td class="num">' + (c.files || 0) + '</td></tr>';
+    html += '<tr>' +
+            '<td class="c-name" data-label="">' + esc(same ? c.channel : c.label) + '</td>' +
+            '<td class="num c-dir" data-label="目录"' + (same ? ' data-same="1"' : '') + '>' +
+                (same ? '—' : esc(c.channel)) + '</td>' +
+            '<td data-label="状态">' + tagFor(c) + '</td>' +
+            '<td class="num" data-label="最新录像">' + esc(c.latest_str) + '</td>' +
+            '<td class="num" data-label="已闲置">' + (c.idle_min == null ? '—' : c.idle_min + ' 分钟') + '</td>' +
+            '<td class="num" data-label="文件数">' + (c.files || 0) + '</td></tr>';
   }
   box.innerHTML = html + '</tbody></table>';
 }

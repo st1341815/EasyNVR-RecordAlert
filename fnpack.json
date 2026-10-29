@@ -28,8 +28,19 @@
       "install_type": "",
       "is_docker": false,
       "service_port": "",
-      "details_updated_at": "2026-10-29T10:30:00+08:00",
+      "details_updated_at": "2026-10-29T12:30:00+08:00",
       "releases": {
+        "1.0.7": {
+          "changelog": "修复手机端（飞牛客户端 / 窄屏浏览器）通道状态表溢出屏幕：根因是表格所有单元格 white-space:nowrap，6 列 min-content 宽 520px，而卡片没有横向滚动兜底，375px 视口下溢出 180px。现 ≤640px 时通道表改为逐通道卡片（标签在左、值在右，长 ID 可换行），卡片加横向滚动兜底，输入框用 16px 防 iOS 聚焦缩放，无别名时「目录」列自动隐藏。实测 375px/320px 视口溢出 0、无文字裁切；桌面端布局不变。",
+          "updated_at": "2026-10-29T12:29:00+08:00",
+          "packages": {
+            "all": {
+              "download_url": "https://github.com/st1341815/EasyNVR-RecordAlert/releases/download/v1.0.7/EasyNVR-RecordAlert-1.0.7.fpk",
+              "sha256": "b20962aa6da0ce34c531934842d56850879cab8c10722b2975594bcc3de901e6",
+              "size": 46974
+            }
+          }
+        },
         "1.0.6": {
           "changelog": "识别 EasyNVR 的「事件抓拍」目录 <YYYYMMDD>_event：按日期目录处理并按扩展名过滤，里面的 jpg 抓拍不会被当成录像（也不影响「最新录像时间」判定）。同期合入 1.0.5 的通道识别重做：按 <摄像头ID>/profile_N/<YYYYMMDD>/ 三层结构发现通道，支持摄像头聚合（默认）/按 profile 分开/单层目录三种口径；新增摄像头别名；扫描改为按日期目录逐天打开（1.8 万个 mp4 约 0.06 秒）并只回溯最近 120 天；缩略图、快照这类按日期分层的目录不再被误当成通道；默认不再启用任何推送渠道（没配 webhook 时不刷失败日志）。",
           "updated_at": "2026-10-29T10:18:00+08:00",

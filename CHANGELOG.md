@@ -10,6 +10,18 @@
 - Release 附件：`EasyNVR-RecordAlert-<版本>.fpk`
 - 主题写正文首行 `## v<版本> · 主题`；仓库内构建产物固定 `dist/erm.fpk`
 
+## v1.0.7
+
+修复手机端（飞牛客户端 / 窄屏浏览器）通道状态表**溢出屏幕**：
+
+- 根因：表格所有 `th/td` 都是 `white-space: nowrap`（为了不让日期、CJK 折行），
+  6 列的 min-content 宽度顶到 520px，而 `.card` 没有横向滚动兜底 → 375px 视口下溢出 180px。
+- 修复：`≤640px` 时通道表改为**逐通道卡片**（左边标签、右边值，长 ID 可换行）；
+  `.card` 加 `overflow-x:auto` 兜底；表单输入框在手机上用 16px 字号（防 iOS 聚焦缩放）；
+  无别名时「目录」列在手机上自动隐藏。
+- 验证：375px / 320px 视口下 `documentElement.scrollWidth == clientWidth`（溢出 0），
+  通道表 / 自检表 / 日志区均无元素超出视口，无文字被裁切；桌面端布局不变。
+
 ## v1.0.6
 
 识别 EasyNVR 的「事件抓拍」目录 `<YYYYMMDD>_event`：按日期目录处理并按扩展名过滤，

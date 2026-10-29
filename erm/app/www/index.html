@@ -54,6 +54,9 @@
   .checks{display:flex;gap:16px;flex-wrap:wrap;margin-top:6px}
   .checks label{display:flex;align-items:center;gap:6px;margin:0;color:var(--ink);font-size:13px}
   .hint{font-size:12px;color:var(--muted);margin-top:6px}
+  .notes{font-size:12px;color:var(--muted);line-height:1.75;margin-top:14px;
+         padding-top:12px;border-top:1px dashed var(--line)}
+  .notes code{font-size:11.5px;background:#f3f0e9;border-radius:4px;padding:1px 5px}
   .msg{margin-top:10px;font-size:13px;padding:9px 11px;border-radius:8px;
        border:1px solid var(--line);background:#fff;white-space:pre-wrap;display:none}
   .msg.show{display:block}
@@ -128,31 +131,31 @@
     <div class="hint" id="rootErr"></div>
   </div>
 
-  <div class="card">
-    <h2>配置</h2>
-    <form id="cfgForm" onsubmit="return false">
+  <form id="cfgForm" onsubmit="return false">
+    <div class="card">
+      <h2>配置</h2>
       <div class="grid">
         <div>
-          <label>录像目录（绝对路径）</label>
+          <label>录像目录</label>
           <input type="text" id="record_root" placeholder="/vol1/1000/easynvr/record">
         </div>
         <div>
-          <label>通道布局（通道按 &lt;摄像头ID&gt;/profile_N/&lt;日期&gt; 自动发现）</label>
+          <label>通道布局</label>
           <select id="channel_layout">
-            <option value="camera">摄像头聚合（一个摄像头=一个通道，推荐）</option>
+            <option value="camera">摄像头聚合（一个摄像头=一个通道）</option>
             <option value="profile">按 profile 分开（主/子码流各算一个）</option>
           </select>
         </div>
         <div>
-          <label>扫描间隔（秒，≥30）</label>
+          <label>扫描间隔（秒）</label>
           <input type="number" id="scan_interval" min="30" step="30">
         </div>
         <div>
-          <label>告警阈值（分钟无新录像）</label>
+          <label>告警阈值（分钟）</label>
           <input type="number" id="alert_threshold_minutes" min="1">
         </div>
         <div>
-          <label>同一异常重复提醒间隔（分钟，0=只提醒一次）</label>
+          <label>重复提醒间隔（分钟）</label>
           <input type="number" id="alert_silence_minutes" min="0">
         </div>
         <div>
@@ -166,25 +169,37 @@
       </div>
 
       <div style="margin-top:14px">
-        <label>摄像头别名（每行一条：<code>摄像头ID=名称</code>，也可写 <code>ID/profile_1=名称</code>；别名只影响显示与告警文案）</label>
+        <label>摄像头别名</label>
         <textarea id="channel_aliases" rows="3" placeholder="O27fqV6dYvs3T=大门&#10;Xk91mQ2pLzT0=后院"></textarea>
       </div>
 
-      <div style="margin-top:14px">
-        <label>推送渠道</label>
-        <div class="checks">
-          <label><input type="checkbox" id="ch_dingtalk"> 钉钉</label>
-          <label><input type="checkbox" id="ch_feishu"> 飞书</label>
-          <label><input type="checkbox" id="ch_wechat"> 企业微信</label>
-          <label><input type="checkbox" id="notify_recovery"> 恢复时补发通知</label>
-        </div>
+      <div class="notes">
+        · 录像目录填 EasyNVR 的录像根目录（绝对路径），通道按 <code>&lt;摄像头ID&gt;/profile_N/&lt;日期&gt;/</code> 自动发现，不需要填写通道清单。<br>
+        · 扫描间隔不低于 30 秒；告警阈值 = 多少分钟没有新增录像就告警。<br>
+        · 重复提醒间隔填 <b>0</b> 表示同一异常只提醒一次，恢复后才重新提醒。<br>
+        · 摄像头别名每行一条：<code>摄像头ID=名称</code>，也可写 <code>ID/profile_1=名称</code>；只影响显示与告警文案。
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>推送渠道</h2>
+      <div class="checks">
+        <label><input type="checkbox" id="ch_dingtalk"> 钉钉</label>
+        <label><input type="checkbox" id="ch_feishu"> 飞书</label>
+        <label><input type="checkbox" id="ch_wechat"> 企业微信</label>
+        <label><input type="checkbox" id="notify_recovery"> 恢复时补发通知</label>
       </div>
 
       <div class="grid" style="margin-top:12px">
         <div><label>钉钉 Webhook</label><input type="text" id="dingtalk_webhook" placeholder="https://oapi.dingtalk.com/robot/send?access_token=…"></div>
-        <div><label>钉钉加签密钥（用「加签」安全设置时填）</label><input type="text" id="dingtalk_secret" placeholder="SEC…"></div>
+        <div><label>钉钉加签密钥</label><input type="text" id="dingtalk_secret" placeholder="SEC…"></div>
         <div><label>飞书 Webhook</label><input type="text" id="feishu_webhook" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/…"></div>
         <div><label>企业微信 Webhook</label><input type="text" id="wechat_webhook" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…"></div>
+      </div>
+
+      <div class="notes">
+        · 钉钉机器人用「加签」安全设置时必须同时填加签密钥，否则会被拒收（errcode 310000）；用「自定义关键词」时留空。<br>
+        · 没勾选任何渠道时，告警只写运行日志（不会刷失败记录）。
       </div>
 
       <div class="row" style="margin-top:16px">
@@ -192,8 +207,8 @@
         <span class="hint" style="margin:0">保存后立即生效，无需重启应用</span>
       </div>
       <div class="msg" id="saveMsg"></div>
-    </form>
-  </div>
+    </div>
+  </form>
 
   <div class="card" id="doctorCard" style="display:none">
     <h2>自检</h2>

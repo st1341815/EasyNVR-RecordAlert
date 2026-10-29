@@ -28,8 +28,19 @@
       "install_type": "",
       "is_docker": false,
       "service_port": "",
-      "details_updated_at": "2026-10-29T15:29:00+08:00",
+      "details_updated_at": "2026-10-29T16:00:00+08:00",
       "releases": {
+        "1.0.9": {
+          "changelog": "配置区排版整理（纯 UI）：输入框标签里的大段说明（如「通道布局（通道按 <摄像头ID>/profile_N/<日期> 自动发现）」）会随宽度自动折行，现改为标签只留字段名、说明统一放到卡片底部的注释块（虚线分隔）；「配置」与「推送渠道」拆成两张卡片，保存按钮放在推送渠道卡片底部（一次保存同时提交两块）；重复提醒间隔、扫描间隔等标签去掉长括号，语义写进注释块。",
+          "updated_at": "2026-10-29T16:00:00+08:00",
+          "packages": {
+            "all": {
+              "download_url": "https://github.com/st1341815/EasyNVR-RecordAlert/releases/download/v1.0.9/EasyNVR-RecordAlert-1.0.9.fpk",
+              "sha256": "a341899f8640c216250f7ef8983ee9c00e9cd456551f7f21bd94900504eb8fb5",
+              "size": 47287
+            }
+          }
+        },
         "1.0.8": {
           "changelog": "安装向导不再询问录像目录与通道（只保留推送渠道与检测参数）；去掉与 EasyNVR 真实目录结构不符的 stream_* 相关设置——「通道（逗号分隔，支持 stream_* 通配）」与「单层目录自动发现规则」两项已删除，通道一律按 <摄像头ID>/profile_N/<日期>/ 自动发现；「通道布局」只剩 摄像头聚合 / 按 profile 分开，旧配置里的 auto、flat 与这两个废弃字段会在下次保存时自动清理。",
           "updated_at": "2026-10-29T15:15:00+08:00",

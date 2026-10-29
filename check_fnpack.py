@@ -10,6 +10,7 @@
 
 import hashlib
 import json
+import time
 import os
 import struct
 import subprocess
@@ -32,10 +33,24 @@ def ck(cond, name, detail=""):
     checks.append((bool(cond), name, detail))
 
 
+def fetch(url, timeout=25, tries=4):
+    """带重试的 GET（到 GitHub / jsDelivr 的连接偶发 TLS 中断）。"""
+    last = None
+    for i in range(tries):
+        try:
+            req = urllib.request.Request(url, method="GET",
+                                         headers={"User-Agent": "fnpack-check"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.status, r.read(), r.headers.get("Content-Type", "")
+        except Exception as e:                      # noqa: BLE001
+            last = e
+            time.sleep(1.5 * (i + 1))
+    raise last
+
+
 def head(url, timeout=25):
-    req = urllib.request.Request(url, method="GET", headers={"User-Agent": "fnpack-check"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.status, len(r.read()), r.headers.get("Content-Type", "")
+    st, body, ctype = fetch(url, timeout=timeout)
+    return st, len(body), ctype
 
 
 def main():
@@ -91,8 +106,7 @@ def main():
     ck(st == 200 and n < 500 * 1024 and "image" in ctype, "icon_url 可下载且是图片",
        "%s %s B %s" % (st, n, ctype))
     try:
-        import io
-        data = urllib.request.urlopen(app["icon_url"], timeout=25).read()
+        _st, data, _ct = fetch(app["icon_url"], timeout=25)
         w, h = struct.unpack(">II", data[16:24])
         ck((w, h) == (256, 256), "icon 尺寸 256×256", (w, h))
     except Exception as e:

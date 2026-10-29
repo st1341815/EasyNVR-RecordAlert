@@ -141,6 +141,26 @@ sudo curl -s --unix-socket /vol1/@appcenter/erm/erm.sock \
 - **缩略图 / 快照这类按日期分层的目录不会被当成通道**：只认带 `profile_N` 子目录的摄像头 ID 目录（`flat` 模式除外）。
 - 全部 profile 都没文件 → 「无录像文件」告警；某个 profile 空了但别的还在 → 摄像头聚合口径视为正常（这就是默认用 camera 的原因）。
 
+## 5.2 加入 FnDepot 外部源
+
+仓库根有 `fnpack.json`（FnDepot V2 规范），两种加法：
+
+| 方式 | 在 FnDepot 里填 |
+| --- | --- |
+| **GitHub 仓库模式**（推荐，读的是实时内容） | `https://github.com/st1341815/EasyNVR-RecordAlert` |
+| JSON 直链（国内加速） | `https://cdn.jsdelivr.net/gh/st1341815/EasyNVR-RecordAlert@main/fnpack.json` |
+
+> jsDelivr 对**已存在的文件**有约 12 小时缓存，改完 `fnpack.json` 后直链可能仍吐旧内容；
+> 要看最新版本请用仓库模式（走 GitHub API，无缓存），或等缓存过期。
+
+改 `fnpack.json` 后先跑自检（会真的去下载图标/预览/安装包并比对 sha256）：
+
+```bash
+PYTHONPATH= python3 check_fnpack.py     # 期望 FNPCK_OK（31 项）
+```
+
+发新版时在 `releases` 里**新增**版本节点（旧节点不要删、不要改，FnDepot 视为不可变）。
+
 ## 6. 几个设计决定（都是踩坑换来的）
 
 1. **单进程 = 网关 + 监控线程**：`cmd/main` 只管一个 pid，避免"网关停了监控还在跑"；

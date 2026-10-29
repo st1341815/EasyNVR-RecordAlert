@@ -26,12 +26,11 @@ import threading
 import time
 import traceback
 from http.server import BaseHTTPRequestHandler
-from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 APP_NAME = "erm"
 GATEWAY_PREFIX = "/app/" + APP_NAME
-VERSION = "1.0.7"
+VERSION = "1.0.8"
 
 SELF = os.path.abspath(__file__)
 APP_DEST = os.path.dirname(SELF)           # app/ 的内容直接铺到 target 根
@@ -132,7 +131,7 @@ def status_payload():
         "config": cfg_public(cfg),
         "state": st,
         "channels": last_res.get("channels") or [],
-        "layout": last_res.get("layout") or cfg.get("channel_layout") or "auto",
+        "layout": last_res.get("layout") or cfg.get("channel_layout") or "camera",
         "channel_count": len(last_res.get("channels") or []),
         "root": last_res.get("root") or cfg.get("record_root") or "",
         "error": last_res.get("error") or "",
@@ -179,7 +178,7 @@ def handle_action(body, query):
             CFG = new_cfg
         C.save_config(new_cfg)
         log.info("配置已更新：%s", json.dumps({k: new_cfg[k] for k in
-                 ("record_root", "monitor_channels", "alert_threshold_minutes",
+                 ("record_root", "channel_layout", "alert_threshold_minutes",
                   "daily_report_time", "enabled_push_channels")}, ensure_ascii=False))
         out = status_payload()
         out["warnings"] = warnings
@@ -246,16 +245,15 @@ def doctor_payload():
         "可读" if readable else "不可读：请到「应用中心 → 本应用 → 设置 → 授权目录」"
                                 "添加该目录并设为可读，然后重启应用")
     chans = M.resolve_channels(cfg) if root and os.path.isdir(root) else []
-    layout = chans[0].get("layout") if chans else M.detect_layout(Path(root), cfg) \
-        if root and os.path.isdir(root) else "-"
+    layout = cfg.get("channel_layout") or "camera"
     add("通道布局", True,
         {"camera": "摄像头聚合（一个摄像头=一个通道）",
-         "profile": "按 profile 分开（主码流/子码流各算一个）",
-         "flat": "单层目录（channel_include 规则）"}.get(layout, str(layout)))
+         "profile": "按 profile 分开（主码流/子码流各算一个）"}.get(layout, str(layout)))
     add("识别到通道", bool(chans),
         "；".join(c["label"] if c["label"] == c["channel"]
                  else "%s ⇐ %s" % (c["label"], c["channel"]) for c in chans) or
-        "没有识别到通道。EasyNVR 应是 <摄像头ID>/profile_N/<日期>/，也可在配置里手填通道")
+        "没有识别到通道。EasyNVR 的录像应为 <摄像头ID>/profile_N/<日期>/，"
+        "请确认「录像目录」指的正是 easynvr_rec 这一层")
     exts = set(cfg.get("video_exts") or [])
     add("录像后缀", True, " ".join(sorted(exts)))
     for ch in cfg.get("enabled_push_channels") or []:

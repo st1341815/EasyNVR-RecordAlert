@@ -35,7 +35,12 @@ chmod 600 "${VAR}/config.json" 2>/dev/null
 if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then
     {
         echo "EasyNVR 录像监控 安装完成。"
-        echo "录像目录：${wizard_record_root:-（未填写，请打开应用填写）}"
+        if [ -n "${wizard_record_root:-}" ]; then
+            echo "录像目录：${wizard_record_root}"
+        else
+            echo "录像目录：未预置 —— 安装向导不再询问，请打开应用填写「录像目录」并保存。"
+        fi
+        echo "通道：按 EasyNVR 真实目录结构 <摄像头ID>/profile_N/<日期>/ 自动发现，无需配置。"
         echo "下一步：到「应用中心 → 本应用 → 设置 → 授权目录」把录像目录加为可读，然后重启应用。"
     } > "${TRIM_TEMP_LOGFILE}"
 fi

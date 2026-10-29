@@ -4,6 +4,7 @@
 
 覆盖文档评审里点出的每个逻辑坑：
   · 向导字符串 → 强类型（B1）
+  · 通道只按 EasyNVR 真实布局 <摄像头ID>/profile_N/<日期> 自动发现（v1.0.8）
   · 逗号字符串 → 列表，不能拆成单字符（B2）
   · 日报「到点即发 + 当天只发一次 + 重启不重复」（B3）
   · 从未录过像 / 目录不存在 也要告警（B4）
@@ -23,7 +24,6 @@ import threading
 import time
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(HERE, "erm", "app")
@@ -51,23 +51,35 @@ def eq(actual, expected, name):
     ok(actual == expected, name, "got %r, want %r" % (actual, expected))
 
 
+CAM_OK = "AAAA0000000A"        # 刚录过（profile_1 有今天、profile_2 只有 3 小时前）
+CAM_SILENT = "BBBB0000000B"    # 3 小时没录像
+CAM_EMPTY = "CCCC0000000C"     # profile 目录在，但一个录像文件都没有
+
+
 def mk_record_tree(root):
-    """造一棵 EasyNVR 风格目录：stream_1 刚录过 / stream_2 停了 3 小时 / stream_3 空目录。"""
+    """造一棵 EasyNVR 真实布局的目录：
+    <root>/<摄像头ID>/profile_<n>/<YYYYMMDD>/<录像文件>
+
+    A 刚录过（两个 profile）/ B 停了 3 小时 / C 空目录。
+    返回 (root, {摄像头ID: [文件路径…]})。
+    """
     now = time.time()
-    d_now = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
-    d_old = datetime.fromtimestamp(now - 3 * 3600).strftime("%Y-%m-%d")
-    p1 = os.path.join(root, "stream_1", d_now)
-    p2 = os.path.join(root, "stream_2", d_old)
-    p3 = os.path.join(root, "stream_3", "empty")
-    for p in (p1, p2, p3):
+    d_now = datetime.fromtimestamp(now).strftime("%Y%m%d")
+    d_old = datetime.fromtimestamp(now - 3 * 3600).strftime("%Y%m%d")
+    files = {}
+    for cam, prof, day, ts in (
+            (CAM_OK, "profile_1", d_now, now - 60),
+            (CAM_OK, "profile_2", d_old, now - 3 * 3600),
+            (CAM_SILENT, "profile_1", d_old, now - 3 * 3600)):
+        p = os.path.join(root, cam, prof, day)
         os.makedirs(p, exist_ok=True)
-    f1 = os.path.join(p1, "20261029_050000.mp4")
-    f2 = os.path.join(p2, "20261029_020000.mp4")
-    for path, ts in ((f1, now - 60), (f2, now - 3 * 3600)):
-        with open(path, "wb") as f:
+        fp = os.path.join(p, "20261029_%s.mp4" % prof)
+        with open(fp, "wb") as f:
             f.write(b"\0" * 16)
-        os.utime(path, (ts, ts))
-    return root
+        os.utime(fp, (ts, ts))
+        files.setdefault(cam, []).append(fp)
+    os.makedirs(os.path.join(root, CAM_EMPTY, "profile_1", d_now), exist_ok=True)
+    return root, files
 
 
 # ------------------------------------------------------------------ mock 推送服务
@@ -110,24 +122,32 @@ def start_mock():
 
 def test_config_types():
     raw = {"alert_threshold_minutes": "45", "scan_interval": "abc",
-           "alert_silence_minutes": "0", "monitor_channels": "stream_1，stream_2",
+           "alert_silence_minutes": "0",
            "enabled_push_channels": "dingtalk,wechat", "daily_report_time": "7:5",
            "notify_recovery": "停用", "video_exts": "mp4,.TS"}
     cfg = C.normalize(raw)
     eq(cfg["alert_threshold_minutes"], 45, "B1 阈值字符串→int")
     eq(cfg["scan_interval"], 300, "B1 非法 scan_interval → 默认 300")
     eq(cfg["alert_silence_minutes"], 0, "B1 静默 0 保留（0=只报一次）")
-    eq(cfg["monitor_channels"], ["stream_1", "stream_2"], "B2 逗号/中文逗号 → 列表")
     eq(cfg["enabled_push_channels"], ["dingtalk", "wechat"], "B2 渠道列表")
     eq(cfg["daily_report_time"], "07:05", "日报时间规整 HH:MM")
     eq(cfg["notify_recovery"], False, "as_bool 识别「停用」")
     eq(cfg["video_exts"], [".mp4", ".ts"], "后缀补点并小写")
-    # 关键回归：旧代码 list("stream_1,stream_2") 会得到单字符列表
-    ok(cfg["monitor_channels"] != list("stream_1,stream_2"), "B2 不拆成单字符")
     # 关键回归：旧代码 "60" * 60 得到字符串
     ok(cfg["alert_threshold_minutes"] * 60 == 2700, "B1 阈值乘 60 是数字")
     eq(C.normalize({"enabled_push_channels": "bogus"})["enabled_push_channels"], [],
        "未知渠道被过滤")
+
+    # v1.0.8：通道一律自动发现，设置项只剩 camera / profile
+    eq(C.normalize({})["channel_layout"], "camera", "默认通道布局 = camera")
+    eq(C.normalize({"channel_layout": "profile"})["channel_layout"], "profile", "profile 口径保留")
+    eq(C.normalize({"channel_layout": "auto"})["channel_layout"], "camera", "旧值 auto → camera")
+    eq(C.normalize({"channel_layout": "flat"})["channel_layout"], "camera", "旧值 flat → camera")
+    eq(C.normalize({"channel_layout": "bogus"})["channel_layout"], "camera", "非法值 → camera")
+    legacy = C.normalize({"record_root": "/x", "monitor_channels": "a,b",
+                          "channel_include": "stream_*"})
+    ok("monitor_channels" not in legacy, "废弃键 monitor_channels 被丢弃")
+    ok("channel_include" not in legacy, "废弃键 channel_include 被丢弃")
 
 
 def test_config_io():
@@ -144,32 +164,45 @@ def test_config_io():
 
 
 def test_channels_and_evaluate():
-    root = mk_record_tree(os.path.join(TMP_VAR, "record"))
+    root, files = mk_record_tree(os.path.join(TMP_VAR, "record"))
     cfg = C.normalize({"record_root": root, "alert_threshold_minutes": "60",
                        "video_exts": ".mp4"})
-    names = [c["channel"] for c in M.resolve_channels(cfg)]
-    eq(names, ["stream_1", "stream_2", "stream_3"], "自动发现 stream_*")
-
-    # 显式写死一个不存在的通道 → 也要被报出来（B4）
-    cfg2 = C.normalize({"record_root": root, "alert_threshold_minutes": "60",
-                        "monitor_channels": "stream_9"})
-    ev2 = M.evaluate(cfg2)
-    eq(len(ev2["channels"]), 1, "显式通道保留")
-    eq(ev2["channels"][0]["status"], "missing", "B4 目录不存在 → missing（会告警）")
+    chans = M.resolve_channels(cfg)
+    eq([c["channel"] for c in chans], [CAM_OK, CAM_SILENT, CAM_EMPTY],
+       "按 <摄像头ID>/profile_N 自动发现通道")
+    eq([c["profiles"] for c in chans],
+       [["profile_1", "profile_2"], ["profile_1"], ["profile_1"]], "列出各摄像头的 profile")
 
     ev = M.evaluate(cfg)
+    eq(ev["layout"], "camera", "默认摄像头聚合口径")
     st = {c["channel"]: c for c in ev["channels"]}
-    eq(st["stream_1"]["status"], "ok", "刚录过的通道正常")
-    eq(st["stream_2"]["status"], "silent", "3 小时没录像 → silent")
-    eq(st["stream_3"]["status"], "no_record", "B4 空目录 → no_record（会告警）")
-    ok(st["stream_2"]["idle_min"] >= 170, "闲置分钟按「最新文件时间」算", st["stream_2"]["idle_min"])
+    eq(st[CAM_OK]["status"], "ok", "刚录过的通道正常")
+    eq(st[CAM_SILENT]["status"], "silent", "3 小时没录像 → silent")
+    eq(st[CAM_EMPTY]["status"], "no_record", "B4 空 profile → no_record（会告警）")
+    eq(st[CAM_OK]["files"], 2, "聚合统计该摄像头两个 profile 的文件")
+    ok(st[CAM_SILENT]["idle_min"] >= 170, "闲置分钟按「最新文件时间」算", st[CAM_SILENT]["idle_min"])
 
     # B5：最新文件被删（EasyNVR 清理）→ 用历史 state 会误报，用 latest 不会
-    f2 = os.path.join(root, "stream_2", sorted(os.listdir(os.path.join(root, "stream_2")))[0],
-                      "20261029_020000.mp4")
+    f2 = files[CAM_SILENT][0]
     os.utime(f2, (time.time() - 30, time.time() - 30))
     ev = {c["channel"]: c for c in M.evaluate(cfg)["channels"]}
-    eq(ev["stream_2"]["status"], "ok", "B5 清掉旧文件后重新录制 → 立刻恢复正常（不误报）")
+    eq(ev[CAM_SILENT]["status"], "ok", "B5 清掉旧文件后重新录制 → 立刻恢复正常（不误报）")
+
+    # profile 口径：主/子码流各算一个通道
+    cfg_p = C.normalize({"record_root": root, "video_exts": ".mp4",
+                         "channel_layout": "profile"})
+    eq([c["channel"] for c in M.resolve_channels(cfg_p)],
+       ["%s/profile_1" % CAM_OK, "%s/profile_2" % CAM_OK,
+        "%s/profile_1" % CAM_SILENT, "%s/profile_1" % CAM_EMPTY],
+       "profile 口径逐个列出")
+
+    # 老式子目录（stream_*）不再被当成通道：EasyNVR 里根本没有这种目录
+    old = os.path.join(TMP_VAR, "legacy")
+    os.makedirs(os.path.join(old, "stream_1", "20261029"), exist_ok=True)
+    open(os.path.join(old, "stream_1", "20261029", "a.mp4"), "wb").write(b"\0" * 8)
+    ev_old = M.evaluate(C.normalize({"record_root": old}))
+    eq(len(ev_old["channels"]), 0, "stream_* 之类的一层目录不当通道")
+    ok("没有识别到任何通道" in ev_old["error"], "无通道时给出明确错误", ev_old["error"])
 
     # 全局错误：目录不存在 / 没配置
     eq(M.evaluate(C.normalize({"record_root": ""}))["error"], "未配置录像目录", "空目录报错")
@@ -212,9 +245,7 @@ def mk_easynvr_tree(root):
 def test_easynvr_layout():
     root, _files = mk_easynvr_tree(os.path.join(TMP_VAR, "easynvr"))
     cfg = C.normalize({"record_root": root, "alert_threshold_minutes": "60",
-                       "video_exts": ".mp4", "channel_layout": "auto"})
-
-    eq(M.detect_layout(Path(root), cfg), "camera", "自动识别出 EasyNVR 嵌套布局")
+                       "video_exts": ".mp4"})
 
     # camera 口径：一个摄像头一个通道（默认）
     chans = M.resolve_channels(cfg)
@@ -246,42 +277,42 @@ def test_easynvr_layout():
     ok("后院（Xk91mQ2pLzT0）" in msg, "告警用别名+目录名", msg)
     ok("profile：profile_1" in msg, "告警里带 profile 信息", msg)
 
-    # 显式清单：既可写摄像头 ID，也可写 ID/profile_1
-    cfg_e = C.normalize({"record_root": root, "alert_threshold_minutes": "60",
-                         "video_exts": ".mp4",
-                         "monitor_channels": "Xk91mQ2pLzT0,O27fqV6dYvs3T/profile_2"})
-    eq([c["channel"] for c in M.resolve_channels(cfg_e)],
-       ["O27fqV6dYvs3T/profile_2", "Xk91mQ2pLzT0"], "显式通道清单（含 profile）")
+    # 根目录下的日期目录（如 20261029_event 事件抓拍放在根上）不当通道
+    os.makedirs(os.path.join(root, (datetime.now() - timedelta(days=2)).strftime("%Y%m%d")),
+                exist_ok=True)
+    eq([c["channel"] for c in M.resolve_channels(cfg)],
+       ["De45adQ0Mn7U", "O27fqV6dYvs3T", "Xk91mQ2pLzT0"], "根下的日期目录不当通道")
 
     # 日报按天统计：只数昨天的文件（摄像头 A 的 profile_2 有 2 个）
     now = datetime.now(M.get_tz(cfg))
     text = M.build_daily_report(cfg, now)
     ok("O27fqV6dYvs3T：2 个文件" in text, "日报只统计昨天的录像", text)
-    ok("大门：2 个文件" in text or "大门（O27fqV6dYvs3T）：2 个文件" in text, "日报用别名", text)
+    text_a = M.build_daily_report(cfg_a, now)    # 带别名的配置，验日报文案用别名
+    ok("大门（O27fqV6dYvs3T）：2 个文件" in text_a, "日报用别名", text_a)
 
 
 def test_scan_alert_and_silence():
-    root = mk_record_tree(os.path.join(TMP_VAR, "record2"))
+    root, _files = mk_record_tree(os.path.join(TMP_VAR, "record2"))
     cfg = C.normalize({"record_root": root, "alert_threshold_minutes": "60",
                        "alert_silence_minutes": "120", "video_exts": ".mp4",
                        "enabled_push_channels": []})
     state = {}
     res = M.run_scan(cfg, state)
     scopes = sorted(e["scope"] for e in res["events"])
-    eq(scopes, ["stream_2", "stream_3"], "首次扫描对两个异常通道告警（合并一条消息）")
+    eq(scopes, [CAM_SILENT, CAM_EMPTY], "首次扫描对两个异常通道告警（合并一条消息）")
     ok(any(e["kind"] == "alert" for e in res["events"]), "事件类型 alert")
 
     res2 = M.run_scan(cfg, state)
     eq([e["scope"] for e in res2["events"]], [], "静默期内不重复告警")
 
     # 恢复通知
-    f = os.path.join(root, "stream_2")
+    f = os.path.join(root, CAM_SILENT, "profile_1")
     deep = os.path.join(f, sorted(os.listdir(f))[0])
     with open(os.path.join(deep, "new.mp4"), "wb") as fh:
         fh.write(b"\0" * 8)
     res3 = M.run_scan(cfg, state)
     rec = [e["scope"] for e in res3["events"] if e["kind"] == "recovery"]
-    eq(rec, ["stream_2"], "恢复时补发恢复通知")
+    eq(rec, [CAM_SILENT], "恢复时补发恢复通知")
 
     # 全局错误也要告警
     bad = C.normalize({"record_root": "/nope/zzz", "enabled_push_channels": []})
@@ -289,8 +320,8 @@ def test_scan_alert_and_silence():
     ok(any(e["scope"] == "__global__" for e in r4["events"]), "全局错误（目录不可用）也告警")
 
     # 状态里存的是「最新文件时间」，不是告警时间
-    ok(state["channels"]["stream_1"]["latest"] > 0, "state 记录最新文件 mtime")
-    eq(state["channels"]["stream_2"]["alerting"], False, "恢复正常后 alerting=False")
+    ok(state["channels"][CAM_OK]["latest"] > 0, "state 记录最新文件 mtime")
+    eq(state["channels"][CAM_SILENT]["alerting"], False, "恢复正常后 alerting=False")
 
 
 def test_daily_schedule():
@@ -319,21 +350,22 @@ def test_daily_schedule():
 
 
 def test_report_text():
-    root = mk_record_tree(os.path.join(TMP_VAR, "record3"))
+    root, _files = mk_record_tree(os.path.join(TMP_VAR, "record3"))
     cfg = C.normalize({"record_root": root, "video_exts": ".mp4",
                        "alert_threshold_minutes": "60"})
     now = datetime.now(M.get_tz(cfg))
-    # 把 stream_1 的文件时间改到昨天中午，验证「按天统计」
+    # 把所有录像文件的时间改到昨天中午，验证「按天统计」
     y = (now - timedelta(days=1)).replace(hour=12, minute=0, second=0, microsecond=0)
-    d1 = os.path.join(root, "stream_1")
-    for dirpath, _dirs, files in os.walk(d1):
+    for dirpath, _dirs, files in os.walk(root):
         for fn in files:
             os.utime(os.path.join(dirpath, fn), (y.timestamp(), y.timestamp()))
     text = M.build_daily_report(cfg, now)
     ok("录像日报" in text, "日报标题")
-    ok("stream_1：1 个文件" in text, "日报含通道计数", text)
-    ok("合计：1 个录像文件" in text, "日报含合计")
-    ok("异常通道" in text, "日报提示异常通道（stream_2/3）")
+    ok("%s：2 个文件" % CAM_OK in text, "日报含通道计数（聚合两个 profile）", text)
+    ok("%s：1 个文件" % CAM_SILENT in text, "日报逐通道计数", text)
+    ok("%s：0 个文件" % CAM_EMPTY in text, "昨天没录的通道计 0", text)
+    ok("合计：3 个录像文件" in text, "日报含合计", text)
+    ok("异常通道" in text, "日报提示异常通道")
 
 
 def test_push(webhook):

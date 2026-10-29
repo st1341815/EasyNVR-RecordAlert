@@ -137,21 +137,11 @@
           <input type="text" id="record_root" placeholder="/vol1/1000/easynvr/record">
         </div>
         <div>
-          <label>通道（逗号分隔，支持 stream_* 通配；留空用下面的规则）</label>
-          <input type="text" id="monitor_channels" placeholder="stream_1,stream_2 或 channel_*">
-        </div>
-        <div>
-          <label>通道布局</label>
+          <label>通道布局（通道按 &lt;摄像头ID&gt;/profile_N/&lt;日期&gt; 自动发现）</label>
           <select id="channel_layout">
-            <option value="auto">自动识别（推荐）</option>
-            <option value="camera">摄像头聚合（一个摄像头=一个通道）</option>
+            <option value="camera">摄像头聚合（一个摄像头=一个通道，推荐）</option>
             <option value="profile">按 profile 分开（主/子码流各算一个）</option>
-            <option value="flat">单层目录（stream_* 规则）</option>
           </select>
-        </div>
-        <div>
-          <label>单层目录的自动发现规则（布局=单层时生效）</label>
-          <input type="text" id="channel_include" placeholder="stream_*">
         </div>
         <div>
           <label>扫描间隔（秒，≥30）</label>
@@ -279,9 +269,7 @@ function renderChannels(d){
 function fillConfig(cfg){
   const set = (id, v) => { const el = $(id); if (el) el.value = v == null ? '' : v; };
   set('record_root', cfg.record_root);
-  set('monitor_channels', (cfg.monitor_channels || []).join(','));
-  set('channel_include', cfg.channel_include);
-  set('channel_layout', cfg.channel_layout || 'auto');
+  set('channel_layout', cfg.channel_layout || 'camera');
   set('channel_aliases', Object.keys(cfg.channel_aliases || {})
       .map(k => k + '=' + cfg.channel_aliases[k]).join('\n'));
   set('scan_interval', cfg.scan_interval);
@@ -311,7 +299,7 @@ function render(d){
   $('mLast').textContent = d.last_check_str || '—';
   $('mNext').textContent = d.next_scan_sec > 0 ? ('约 ' + d.next_scan_sec + ' 秒后') : '即将进行';
   $('mNextDaily').textContent = d.next_daily_str || '—';
-  const LAY = {camera:'摄像头聚合', profile:'按 profile 分开', flat:'单层目录', auto:'自动'};
+  const LAY = {camera:'摄像头聚合', profile:'按 profile 分开'};
   $('mLayout').textContent = (LAY[d.layout] || d.layout || '—') + '·' + (d.channel_count || 0) + ' 个通道';
   $('rootErr').textContent = d.error ? ('⚠ ' + d.error) : '';
   renderChannels(d);
@@ -372,8 +360,6 @@ $('btnDaily').onclick = async () => {
 $('btnSave').onclick = async () => {
   const cfg = {
     record_root: $('record_root').value.trim(),
-    monitor_channels: $('monitor_channels').value,
-    channel_include: $('channel_include').value.trim() || 'stream_*',
     channel_layout: $('channel_layout').value,
     channel_aliases: $('channel_aliases').value,
     scan_interval: $('scan_interval').value,

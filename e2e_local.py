@@ -102,6 +102,9 @@ def main():
         r = api("save_config", config={"record_root": REC, "alert_threshold_minutes": "60",
                                       "scan_interval": "60", "video_exts": ".mp4"})
         check(r.get("ok"), "保存配置", r)
+        check("monitor_channels" not in r.get("config", {}) and
+              "channel_include" not in r.get("config", {}),
+              "废弃的通道清单/stream_* 规则已不在配置里", sorted(r.get("config", {})))
 
         st = api("scan")
         chans = {c["channel"]: c for c in st["channels"]}
@@ -109,7 +112,7 @@ def main():
         for c in st["channels"]:
             print("   %-18s %-10s idle=%-6s files=%-3s profiles=%s"
                   % (c["channel"], c["tag"], c["idle_min"], c["files"], ",".join(c["profiles"])))
-        check(st.get("layout") == "camera", "自动识别为摄像头聚合", st.get("layout"))
+        check(st.get("layout") == "camera", "默认摄像头聚合口径", st.get("layout"))
         check("thumbnails" not in chans, "thumbnails 之类目录未被当成通道", list(chans))
         check(set(chans) == {"O27fqV6dYvs3T", "Xk91mQ2pLzT0", "De45adQ0Mn7U"}, "识别到 3 个摄像头", list(chans))
         check(chans["O27fqV6dYvs3T"]["status"] == "ok", "刚录过的摄像头正常", chans["O27fqV6dYvs3T"]["status"])

@@ -130,92 +130,37 @@ def _channel(cfg, root, rel, layout, profiles=None):
             "layout": layout, "profiles": list(profiles or [])}
 
 
-def detect_layout(root, cfg):
-    """自动识别：有 <目录>/profile_<n> 就是 EasyNVR 嵌套结构，否则按老式一层处理。"""
-    want = (cfg.get("channel_layout") or "auto").lower()
-    if want != "auto":
-        return "flat" if want == "flat" else want
-    for d in _subdirs(root):
-        if DATE_RE.match(d.name):
-            continue
-        if any(PROFILE_RE.match(c.name) for c in _subdirs(d)):
-            return "camera"
-    return "flat"
-
-
 def resolve_channels(cfg):
     """返回 [{"channel","label","path","layout","profiles"}]。
 
-    三种支持形态：
-      · EasyNVR 嵌套 <ID>/profile_<n>/<日期>/…（camera 或 profile 口径）
-      · 老式一层 <root>/stream_*（channel_include 可改模式）
-      · 显式清单 monitor_channels：["O27fqV6dYvs3T", "O27fqV6dYvs3T/profile_1", "stream_*"]
+    通道一律按 EasyNVR 的真实布局自动发现：
+      <录像根目录>/<摄像头随机ID>/profile_<n>/<YYYYMMDD>/<录像文件>
+    口径由 channel_layout 决定：
+      camera  = 一个摄像头一个通道（聚合它下面所有 profile_N）
+      profile = 每个 profile_N 各算一个通道
+
+    没有 profile_N 子目录的一级目录**不当通道**：EasyNVR 的缩略图 / 事件抓拍 /
+    日志目录也可能按日期分层，误当成通道会报"无录像"假告警。
     """
     root_s = str(cfg.get("record_root") or "").strip()
     if not root_s:
         return []
     root = Path(root_s)
-    layout = detect_layout(root, cfg)
-    explicit = list(cfg.get("monitor_channels") or [])
-
-    if explicit:
-        out, seen = [], set()
-        for item in explicit:
-            item = str(item).strip().strip("/")
-            if not item:
-                continue
-            if any(ch in item for ch in "*?["):
-                try:
-                    matches = sorted(p for p in root.glob(item) if p.is_dir())
-                except Exception:
-                    matches = []
-                for p in matches:
-                    rel = p.relative_to(root).as_posix()
-                    if rel not in seen:
-                        seen.add(rel)
-                        out.append(_channel(cfg, root, rel, layout))
-                continue
-            if item in seen:
-                continue
-            seen.add(item)
-            if "/" in item:                        # 明确指定到 profile
-                out.append(_channel(cfg, root, item, "profile"))
-                continue
-            d = root / item
-            profs = sorted((c.name for c in _subdirs(d) if PROFILE_RE.match(c.name)),
-                           key=lambda n: int(PROFILE_RE.match(n).group(1)))
-            if profs and layout == "profile":
-                for pr in profs:
-                    out.append(_channel(cfg, root, "%s/%s" % (item, pr), "profile", [pr]))
-            elif profs:
-                out.append(_channel(cfg, root, item, "camera", profs))
-            else:
-                out.append(_channel(cfg, root, item, "flat"))
-        out.sort(key=lambda c: c["channel"])
-        return out
+    layout = "profile" if (cfg.get("channel_layout") or "camera").lower() == "profile" else "camera"
 
     out = []
-    if layout == "flat":
-        pattern = cfg.get("channel_include") or "stream_*"
-        try:
-            matches = sorted(p for p in root.glob(pattern) if p.is_dir())
-        except Exception:
-            matches = []
-        return [_channel(cfg, root, p.name, "flat") for p in matches]
-
     for cam in _subdirs(root):
         if DATE_RE.match(cam.name):               # 直接躺在根下的日期目录，不是摄像头
             continue
         profs = sorted((c.name for c in _subdirs(cam) if PROFILE_RE.match(c.name)),
                        key=lambda n: int(PROFILE_RE.match(n).group(1)))
-        if profs:
-            if layout == "profile":
-                for pr in profs:
-                    out.append(_channel(cfg, root, "%s/%s" % (cam.name, pr), "profile", [pr]))
-            else:
-                out.append(_channel(cfg, root, cam.name, "camera", profs))
-        # 没有 profile_* 的子目录不当通道：EasyNVR 的缩略图/快照/日志目录
-        # 也可能按日期分层，误当成通道会报"无录像"假告警。
+        if not profs:
+            continue
+        if layout == "profile":
+            for pr in profs:
+                out.append(_channel(cfg, root, "%s/%s" % (cam.name, pr), "profile", [pr]))
+        else:
+            out.append(_channel(cfg, root, cam.name, "camera", profs))
     out.sort(key=lambda c: c["channel"])
     return out
 
@@ -318,7 +263,7 @@ def evaluate(cfg, now=None, with_counts=True, window=None):
     root = cfg.get("record_root") or ""
 
     result = {"root": root, "checked_at": now_ts, "channels": [], "error": "",
-              "layout": cfg.get("channel_layout") or "auto"}
+              "layout": (cfg.get("channel_layout") or "camera")}
     if not root:
         result["error"] = "未配置录像目录"
         return result
@@ -333,11 +278,12 @@ def evaluate(cfg, now=None, with_counts=True, window=None):
 
     chans = resolve_channels(cfg)
     if not chans:
-        result["error"] = ("录像目录下没有识别到任何通道。EasyNVR 应为 "
-                           "<摄像头ID>/profile_N/<日期>/；也可在配置里手填通道相对路径")
+        result["error"] = ("录像目录下没有识别到任何通道。EasyNVR 的录像应为 "
+                           "<摄像头ID>/profile_N/<日期>/，请确认「录像目录」指的正是 "
+                           "easynvr_rec 这一层（不是它的上级或某个摄像头目录）")
         return result
 
-    result["layout"] = chans[0].get("layout") or "flat"
+    result["layout"] = chans[0].get("layout") or "camera"
     for ch in chans:
         path = Path(ch["path"])
         item = {"channel": ch["channel"], "label": ch["label"], "path": ch["path"],

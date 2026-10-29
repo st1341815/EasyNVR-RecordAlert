@@ -8,7 +8,7 @@
 <录像根目录>/<摄像头随机ID>/profile_<通道号>/<YYYYMMDD>/20261029000315-62000.mp4
 例：/vol3/1000/NVR/easynvr_rec/O27fqV6dYvs3T/profile_1/20261029/20261029000315-62000.mp4
 ```
-支持钉钉（含「加签」）、飞书、企业微信；多通道与 `stream_*` 自动发现；配置改动即时生效。
+支持钉钉（含「加签」）、飞书、企业微信；通道按上面的真实目录结构**自动发现**（无需填写通道清单或通配规则）；配置改动即时生效。
 
 本工程是「文档评审 → 重写 → 真机实测」的产物，**不是**原文档那份代码的补丁版：
 原文档在平台接入层（manifest / wizard / privilege / 路径 / 状态返回码 / 依赖安装）和核心逻辑
@@ -16,7 +16,7 @@
 `../EasyNVR-fpk文档评审_2026-10-29.md`，实测记录见 `docs/实测报告.md`。
 
 > **下载安装**：到 [Releases](https://github.com/st1341815/EasyNVR-RecordAlert/releases) 下载
-> `EasyNVR-RecordAlert-<版本>.fpk` → 飞牛「应用中心 → 手动安装」→ 填录像目录 → 到「设置 → 授权目录」授权该目录 → 重启应用。
+> `EasyNVR-RecordAlert-<版本>.fpk` → 飞牛「应用中心 → 手动安装」（**向导不问录像目录与通道**）→ 打开应用填录像目录 → 到「设置 → 授权目录」授权该目录 → 重启应用。
 > 版本变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 
@@ -28,7 +28,7 @@
 erm-fpk/
 ├── build.sh               一键构建（权限校准 + JSON/manifest 校验 + py_compile + fnpack）
 ├── gen_icons.py           生成 64/256 图标（纯标准库，无 Pillow）
-├── selftest.py            55 项断言的自检（不联网，除本地 mock）
+├── selftest.py            79 项断言的自检（不联网，除本地 mock）
 ├── mock_webhook.py        本地 mock 钉钉/企微/飞书（验收推送链路用）
 ├── preview_proxy.py       不登录 fnOS 也能看页面（只读转发，仅供调试）
 ├── docs/                  截图与实测报告
@@ -65,7 +65,7 @@ erm-fpk/
 
 ```bash
 bash build.sh                 # 产出 dist/erm.fpk
-PYTHONPATH= python3 selftest.py   # 55 项断言（先跑这个再打包）
+PYTHONPATH= python3 selftest.py   # 79 项断言（先跑这个再打包）
 bash gen_icons.py             # 只有换图标时才需要
 ```
 
@@ -93,7 +93,8 @@ bash gen_icons.py             # 只有换图标时才需要
 ## 4. 安装（本机 / 任意 fnOS）
 
 ```bash
-# 1) 装（向导值可用 -e 传，也可装完在应用里填）
+# 1) 装（v1.0.8 起向导只问推送渠道与检测参数，录像目录装完在应用里填；
+#    命令行想预置目录仍可用 -e 传 wizard_record_root）
 sudo appcenter-cli install-fpk ./dist/erm.fpk -e ./install.env
 
 # install.env 示例
@@ -131,14 +132,18 @@ sudo curl -s --unix-socket /vol1/@appcenter/erm/erm.sock \
 
 | 配置项 | 取值 | 说明 |
 | --- | --- | --- |
-| `channel_layout` | `camera`（默认）/ `profile` / `flat` / `auto` | **camera** = 一个摄像头一个通道（聚合它所有 `profile_N`）—— 子码流不录制时不会误报；**profile** = 每个 `profile_N` 各算一个（能发现"主码流挂了但子码流还在"）；**flat** = 老式一层 `stream_*` |
-| `monitor_channels` | `O27fqV6dYvs3T`、`O27fqV6dYvs3T/profile_1`、`stream_*` | 留空 = 自动发现；填了就只监控这些 |
+| `channel_layout` | `camera`（默认）/ `profile` | **camera** = 一个摄像头一个通道（聚合它所有 `profile_N`）—— 子码流不录制时不会误报；**profile** = 每个 `profile_N` 各算一个（能发现"主码流挂了但子码流还在"） |
 | `channel_aliases` | `O27fqV6dYvs3T=大门` | 只影响显示与告警文案（页面上是多行文本框） |
+
+> **v1.0.8 起不再有 `monitor_channels` / `channel_include`**：EasyNVR 里没有 `stream_*` 这类目录，
+> 手填通道清单只会填错。通道一律按 `<摄像头ID>/profile_N/<日期>/` 自动发现；
+> 旧配置里的 `auto` / `flat` 自动归到 `camera`，这两个废弃键在下次保存时被丢弃。
 
 几个实现细节：
 
 - **扫描按日期目录逐天打开**，不递归整棵树：1.8 万个 mp4（60 天 × 300）一次扫描约 **0.06 秒**；只回溯最近 120 天（`LOOKBACK_DIRS`）。
-- **缩略图 / 快照这类按日期分层的目录不会被当成通道**：只认带 `profile_N` 子目录的摄像头 ID 目录（`flat` 模式除外）。
+- **缩略图 / 快照这类按日期分层的目录不会被当成通道**：只认带 `profile_N` 子目录的摄像头 ID 目录。
+- **老式的 `stream_*` 一层目录不算通道**（v1.0.8 起）：EasyNVR 不会生成这种目录，出现它说明「录像目录」指错了层级。
 - 全部 profile 都没文件 → 「无录像文件」告警；某个 profile 空了但别的还在 → 摄像头聚合口径视为正常（这就是默认用 camera 的原因）。
 
 ## 5.2 加入 FnDepot 外部源
@@ -194,12 +199,12 @@ PYTHONPATH= python3 check_fnpack.py     # 期望 FNPCK_OK（31 项）
 
 ## 8. 自检覆盖
 
-`selftest.py` 55 项断言，重点回归原文档的每个坑：
+`selftest.py` 79 项断言，重点回归原文档的每个坑：
 
 | 断言 | 对应问题 |
 | --- | --- |
 | `"60" * 60 == 2700` | 阈值字符串相乘 → TypeError → 永不告警 |
-| `monitor_channels != list("stream_1,stream_2")` | 逗号字符串被拆成单字符 |
+| `stream_*` 一层目录不被当成通道 | 「录像目录」指错层级时不要给出假告警 |
 | 300s 采样一天命中 08:00 次数 = 0 | 旧日报调度的复现 |
 | 清掉旧文件后立刻恢复正常 | 判定基准用历史值会误报 |
 | 空目录/不存在目录 → 状态为告警 | `latest==0` 静默跳过 |

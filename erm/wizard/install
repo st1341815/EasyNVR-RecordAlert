@@ -1,38 +1,10 @@
 [
   {
-    "stepTitle": "EasyNVR 录像监控 · 录像目录",
+    "stepTitle": "EasyNVR 录像监控 · 安装说明",
     "items": [
       {
         "type": "tips",
-        "helpText": "填写 EasyNVR 的录像根目录绝对路径（例如 /vol1/1000/easynvr/record）。装好之后还需要两步：① 打开应用填写/确认配置；② 到「应用中心 → 本应用 → 设置 → 授权目录」把该目录加为可读，否则应用读不到录像文件。若录像在外接盘（U 盘/SD 卡），还要到飞牛「文件管理 → 设置 → 外接存储权限」选「所有账户可见」。"
-      },
-      {
-        "type": "text",
-        "field": "wizard_record_root",
-        "label": "录像根目录（绝对路径）",
-        "initValue": "",
-        "rules": [
-          {
-            "required": true,
-            "message": "请填写录像根目录的绝对路径"
-          },
-          {
-            "pattern": "^/",
-            "message": "必须是绝对路径（以 / 开头）"
-          }
-        ]
-      },
-      {
-        "type": "text",
-        "field": "wizard_monitor_channels",
-        "label": "监控通道（逗号分隔，支持 stream_* 通配；留空则自动发现）",
-        "initValue": ""
-      },
-      {
-        "type": "text",
-        "field": "wizard_channel_include",
-        "label": "自动发现规则（通道留空时生效）",
-        "initValue": "stream_*"
+        "helpText": "安装向导不再要求填写录像目录与通道：EasyNVR 的录像目录固定是 <摄像头ID>/profile_N/<日期>/<录像文件>，通道会在装好后自动发现。装完只需两步：① 打开应用，在「录像目录」里填 EasyNVR 的录像根目录（例如 /vol3/1000/NVR/easynvr_rec）并保存；② 到「应用中心 → 本应用 → 设置 → 授权目录」把该目录加为可读，然后重启应用。若录像在外接盘（U 盘 / SD 卡），还要到飞牛「文件管理 → 设置 → 外接存储权限」选「所有账户可见」。"
       }
     ]
   },

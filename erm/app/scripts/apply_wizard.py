@@ -5,6 +5,9 @@
 飞牛不会替应用写配置文件：向导字段是以 `wizard_<field>` 环境变量传给
 install_callback / config_callback 的，必须自己落到盘上（文档评审 A3）。
 
+v1.0.8 起：安装向导不再询问录像目录与通道（目录在应用页面里填、通道全自动发现），
+但 `wizard_record_root` 的映射保留 —— 命令行 `install-fpk -e install.env` 仍可预置。
+
 用法（在 cmd 脚本里）：
     python3 "$DEST/scripts/apply_wizard.py" "$VAR/config.json"
 
@@ -23,8 +26,6 @@ import config as C  # noqa: E402
 # wizard 字段 → 配置键；kind 决定怎么解析
 MAP = [
     ("wizard_record_root", "record_root", "str"),
-    ("wizard_monitor_channels", "monitor_channels", "list"),
-    ("wizard_channel_include", "channel_include", "str"),
     ("wizard_scan_interval", "scan_interval", "int"),
     ("wizard_alert_threshold_minutes", "alert_threshold_minutes", "int"),
     ("wizard_alert_silence_minutes", "alert_silence_minutes", "int"),

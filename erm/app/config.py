@@ -18,17 +18,15 @@ from pathlib import Path
 APP_NAME = "erm"
 
 DEFAULT_CONFIG = {
-    # 录像目录
+    # 录像目录（安装向导不再询问，装好后在应用页面里填）
     "record_root": "",
-    # 通道布局：
-    #   auto    = 自动识别（发现 <ID>/profile_N 就用 EasyNVR 布局，否则按 channel_include 平铺扫）
-    #   camera  = 一个摄像头算一个通道（聚合它下面所有 profile_N）
-    #   profile = 每个 <ID>/profile_N 各算一个通道
-    #   flat    = 老式一层目录（<root>/stream_*）
-    "channel_layout": "auto",
-    # 通道：可填相对路径（ID 或 ID/profile_1），也支持 glob 模式；留空 = 按布局自动发现
-    "monitor_channels": [],
-    "channel_include": "stream_*",
+    # 通道布局。EasyNVR 的录像目录只有一种形态：
+    #   <录像根目录>/<摄像头随机ID>/profile_<通道号>/<YYYYMMDD>/<录像文件>
+    # 所以通道一律自动发现，不需要（也不支持）手填通道清单或通配规则。
+    #   camera  = 一个摄像头算一个通道（聚合它下面所有 profile_N；默认，
+    #             子码流不录制时不会误报）
+    #   profile = 每个 <ID>/profile_N 各算一个通道（主码流挂了但子码流还在时能发现）
+    "channel_layout": "camera",
     # 摄像头别名：{"O27fqV6dYvs3T": "大门", "O27fqV6dYvs3T/profile_1": "大门主码流"}
     "channel_aliases": {},
     # 扫描与告警
@@ -96,7 +94,7 @@ def as_bool(value, default=False):
 def as_list(value):
     """'a,b' / 'a，b' / ['a','b'] / 'a' → ['a','b']。
 
-    注意：绝对不能用 list(str)，那会把 'stream_1,stream_2' 拆成单字符。
+    注意：绝对不能用 list(str)，那会把 'a,b' 拆成单字符。
     """
     if value is None:
         return []
@@ -155,10 +153,16 @@ def normalize(raw):
         cfg.update({k: v for k, v in raw.items() if v is not None})
 
     cfg["record_root"] = str(cfg.get("record_root") or "").strip().rstrip("/")
-    cfg["monitor_channels"] = as_list(cfg.get("monitor_channels"))
-    cfg["channel_include"] = str(cfg.get("channel_include") or "stream_*").strip() or "stream_*"
-    layout = str(cfg.get("channel_layout") or "auto").strip().lower()
-    cfg["channel_layout"] = layout if layout in ("auto", "camera", "profile", "flat") else "auto"
+    # 已废弃的两个键（v1.0.8）：手工通道清单 monitor_channels、单层目录发现规则
+    # channel_include。EasyNVR 目录里没有 stream_* 这种东西，通道一律按
+    # <摄像头ID>/profile_N 自动发现 —— 旧配置里残留的这两个键在这里直接丢掉，
+    # 下次保存时 config.json 也就干净了。
+    for legacy in ("monitor_channels", "channel_include"):
+        cfg.pop(legacy, None)
+    layout = str(cfg.get("channel_layout") or "camera").strip().lower()
+    # 旧值 auto（自动识别）与 flat（单层 stream_* 目录）都归到 camera：
+    # 真实 EasyNVR 布局下 auto 本来就等价于 camera，flat 已经没有意义。
+    cfg["channel_layout"] = layout if layout in ("camera", "profile") else "camera"
     cfg["channel_aliases"] = as_alias_map(cfg.get("channel_aliases"))
 
     cfg["scan_interval"] = as_int(cfg.get("scan_interval"), 300, 30)

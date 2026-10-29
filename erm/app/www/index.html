@@ -53,6 +53,7 @@
   input:focus{outline:2px solid var(--brand-soft);border-color:var(--brand)}
   .checks{display:flex;gap:16px;flex-wrap:wrap;margin-top:6px}
   .checks label{display:flex;align-items:center;gap:6px;margin:0;color:var(--ink);font-size:13px}
+  .push-field[hidden]{display:none}
   .hint{font-size:12px;color:var(--muted);margin-top:6px}
   .notes{font-size:12px;color:var(--muted);line-height:1.75;margin-top:14px;
          padding-top:12px;border-top:1px dashed var(--line)}
@@ -190,16 +191,29 @@
         <label><input type="checkbox" id="notify_recovery"> 恢复时补发通知</label>
       </div>
 
-      <div class="grid" style="margin-top:12px">
-        <div><label>钉钉 Webhook</label><input type="text" id="dingtalk_webhook" placeholder="https://oapi.dingtalk.com/robot/send?access_token=…"></div>
-        <div><label>钉钉加签密钥</label><input type="text" id="dingtalk_secret" placeholder="SEC…"></div>
-        <div><label>飞书 Webhook</label><input type="text" id="feishu_webhook" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/…"></div>
-        <div><label>企业微信 Webhook</label><input type="text" id="wechat_webhook" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…"></div>
+      <div class="grid" style="margin-top:12px" id="pushFields">
+        <div class="push-field" data-ch="dingtalk">
+          <label>钉钉 Webhook</label>
+          <input type="text" id="dingtalk_webhook" placeholder="https://oapi.dingtalk.com/robot/send?access_token=…">
+        </div>
+        <div class="push-field" data-ch="dingtalk">
+          <label>钉钉加签密钥</label>
+          <input type="text" id="dingtalk_secret" placeholder="SEC…（用「自定义关键词」时留空）">
+        </div>
+        <div class="push-field" data-ch="feishu">
+          <label>飞书 Webhook</label>
+          <input type="text" id="feishu_webhook" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/…">
+        </div>
+        <div class="push-field" data-ch="wechat">
+          <label>企业微信 Webhook</label>
+          <input type="text" id="wechat_webhook" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…">
+        </div>
       </div>
+      <div class="hint" id="pushEmpty">勾选上面的渠道后，这里才会出现对应的 Webhook 填写框（钉钉还会多一个「加签密钥」）。</div>
 
       <div class="notes">
         · 钉钉机器人用「加签」安全设置时必须同时填加签密钥，否则会被拒收（errcode 310000）；用「自定义关键词」时留空。<br>
-        · 没勾选任何渠道时，告警只写运行日志（不会刷失败记录）。
+        · 没勾选任何渠道时，告警只写运行日志（不会刷失败记录）；取消勾选不会清空已填的 Webhook，重新勾选即可恢复。
       </div>
 
       <div class="row" style="margin-top:16px">
@@ -281,6 +295,26 @@ function renderChannels(d){
   box.innerHTML = html + '</tbody></table>';
 }
 
+const PUSH_CH = ['dingtalk', 'feishu', 'wechat'];
+
+/* 勾了哪个渠道，才显示它的 Webhook（钉钉额外显示加签密钥）；都没勾就只显示提示 */
+function syncPushFields(){
+  let any = false;
+  for (const ch of PUSH_CH) {
+    const on = !!($('ch_' + ch) || {}).checked;
+    document.querySelectorAll('.push-field[data-ch="' + ch + '"]').forEach(el => {
+      el.hidden = !on;
+    });
+    if (on) any = true;
+  }
+  $('pushEmpty').style.display = any ? 'none' : 'block';
+}
+
+PUSH_CH.forEach(ch => {
+  const box = $('ch_' + ch);
+  if (box) box.addEventListener('change', syncPushFields);
+});
+
 function fillConfig(cfg){
   const set = (id, v) => { const el = $(id); if (el) el.value = v == null ? '' : v; };
   set('record_root', cfg.record_root);
@@ -301,6 +335,7 @@ function fillConfig(cfg){
   $('ch_feishu').checked = on.includes('feishu');
   $('ch_wechat').checked = on.includes('wechat');
   $('notify_recovery').checked = !!cfg.notify_recovery;
+  syncPushFields();
 }
 
 function render(d){

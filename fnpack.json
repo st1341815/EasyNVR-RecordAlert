@@ -28,8 +28,19 @@
       "install_type": "",
       "is_docker": false,
       "service_port": "",
-      "details_updated_at": "2026-10-29T16:00:00+08:00",
+      "details_updated_at": "2026-10-29T19:06:00+08:00",
       "releases": {
+        "1.0.10": {
+          "changelog": "推送渠道按需展开：勾选「钉钉/飞书/企业微信」才显示对应的 Webhook 填写框（钉钉另显示加签密钥），都不勾时只显示一行提示；取消勾选不清空已填内容，重新勾选即恢复显示。",
+          "updated_at": "2026-10-29T19:06:00+08:00",
+          "packages": {
+            "all": {
+              "download_url": "https://github.com/st1341815/EasyNVR-RecordAlert/releases/download/v1.0.10/EasyNVR-RecordAlert-1.0.10.fpk",
+              "sha256": "e5ad56e6c2ea608fae3d45c6bacdefbc1df8be5342f85c8e6855346a955ba1a1",
+              "size": 47887
+            }
+          }
+        },
         "1.0.9": {
           "changelog": "配置区排版整理（纯 UI）：输入框标签里的大段说明（如「通道布局（通道按 <摄像头ID>/profile_N/<日期> 自动发现）」）会随宽度自动折行，现改为标签只留字段名、说明统一放到卡片底部的注释块（虚线分隔）；「配置」与「推送渠道」拆成两张卡片，保存按钮放在推送渠道卡片底部（一次保存同时提交两块）；重复提醒间隔、扫描间隔等标签去掉长括号，语义写进注释块。",
           "updated_at": "2026-10-29T16:00:00+08:00",

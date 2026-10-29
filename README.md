@@ -16,7 +16,7 @@
 `../EasyNVR-fpk文档评审_2026-10-29.md`，实测记录见 `docs/实测报告.md`。
 
 > **下载安装**：到 [Releases](https://github.com/st1341815/EasyNVR-RecordAlert/releases) 下载
-> `erm-<版本>.fpk` → 飞牛「应用中心 → 手动安装」→ 填录像目录 → 到「设置 → 授权目录」授权该目录 → 重启应用。
+> `EasyNVR-RecordAlert-<版本>.fpk` → 飞牛「应用中心 → 手动安装」→ 填录像目录 → 到「设置 → 授权目录」授权该目录 → 重启应用。
 > 版本变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 
@@ -71,6 +71,24 @@ bash gen_icons.py             # 只有换图标时才需要
 
 `build.sh` 会卡住 4 类常见错误：JSON 非法、manifest 出现 `[section]`、缺必填字段、Python 语法错。
 打包前会清 `__pycache__`（否则会被打进 app.tgz，包体虚胖）。
+
+### 4.1 发版规范（GitHub Release）
+
+| 项 | 规则 | 示例 |
+| --- | --- | --- |
+| git tag | `v<版本>` | `v1.0.6` |
+| Release 标题 | `EasyNVR-RecordAlert v<版本>`（**项目名 + 版本号**，主题只写正文） | `EasyNVR-RecordAlert v1.0.6` |
+| Release 附件 | `EasyNVR-RecordAlert-<版本>.fpk`（项目名 + 版本号） | `EasyNVR-RecordAlert-1.0.6.fpk` |
+| Release 正文首行 | `## v<版本> · 主题` | `## v1.0.6 · 识别事件抓拍目录` |
+| 仓库内构建产物 | 固定 `dist/erm.fpk`（不带版本号，`build.sh` 与安装命令依赖这个路径） | — |
+
+发版五步：
+
+1. bump 三处版本号：`erm/manifest` 的 `version`、`erm/app/server.py` 的 `VERSION`、`CHANGELOG.md` 新增条目；
+2. `bash build.sh`（会打印建议的标题与附件名）；
+3. `git tag -a v<版本> -m "..." && git push origin main v<版本>`；
+4. 建 Release，标题/附件名按上表；**附件改名只在上传时指定**，不动 `dist/erm.fpk`；
+5. 换附件名要"先传新名 → 回读比对 sha256 → 再删旧名"（GitHub 不支持重命名附件，中途失败会丢包）。
 
 ## 4. 安装（本机 / 任意 fnOS）
 

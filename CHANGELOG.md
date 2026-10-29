@@ -3,6 +3,13 @@
 飞牛 fnOS 原生 fpk 应用。监控 EasyNVR 录像目录，通道长时间没有新增录像就推送告警，
 每天固定时间推送前一天各通道录像数量统计。支持钉钉（含加签）/飞书/企业微信。
 
+## 发版命名规范（2026-10-29 定）
+
+- git tag：`v<版本>`
+- Release 标题：`EasyNVR-RecordAlert v<版本>`
+- Release 附件：`EasyNVR-RecordAlert-<版本>.fpk`
+- 主题写正文首行 `## v<版本> · 主题`；仓库内构建产物固定 `dist/erm.fpk`
+
 ## v1.0.6
 
 识别 EasyNVR 的「事件抓拍」目录 `<YYYYMMDD>_event`：按日期目录处理并按扩展名过滤，

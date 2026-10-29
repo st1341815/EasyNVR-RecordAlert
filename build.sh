@@ -66,3 +66,6 @@ VER="$(awk '/^version[[:space:]]*=/{print $3; exit}' "$PKG/manifest")"
 echo
 echo "构建完成：dist/$PKG.fpk（v${VER}）"
 echo "安装（本机）：sudo appcenter-cli install-fpk $(pwd)/dist/$PKG.fpk --volume-id 1 --yes"
+echo
+echo "[发版] Release 标题：EasyNVR-RecordAlert v${VER}"
+echo "[发版] Release 附件：EasyNVR-RecordAlert-${VER}.fpk（上传时用这个名字；dist/$PKG.fpk 保持不带版本号）"

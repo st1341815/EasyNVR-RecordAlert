@@ -409,6 +409,124 @@ def test_push(webhook):
     eq(N.dingtalk_signed_url("https://x/hook", ""), "https://x/hook", "无密钥时不加签")
 
 
+def test_online_streak():
+    root = os.path.join(TMP_VAR, "online")
+    now = time.time()
+    d = os.path.join(root, "CamA", "profile_1", datetime.now().strftime("%Y%m%d"))
+    os.makedirs(d, exist_ok=True)
+
+    def touch(fp, ts):
+        open(fp, "wb").write(b"\0" * 8)
+        os.utime(fp, (ts, ts))
+
+    # 最近 30 分钟每分钟一个文件（连续在线）；再往前是 3 小时前的旧文件（中间断了 2.5 小时）
+    for i in range(31):
+        touch(os.path.join(d, "new%02d.mp4" % i), now - (30 - i) * 60)
+    for i in range(3):
+        touch(os.path.join(d, "old%02d.mp4" % i), now - 3 * 3600 + i * 60)
+
+    exts = {".mp4"}
+    secs, capped = M.online_streak(os.path.join(root, "CamA"), exts, int(now))
+    eq(capped, False, "窗口内找到了断点")
+    ok(29 * 60 <= secs <= 31 * 60, "在线时长 ≈ 30 分钟", secs)
+    eq(M.fmt_duration(secs), "30 分钟", "格式化：分钟")
+
+    cfg = C.normalize({"record_root": root, "alert_threshold_minutes": "60",
+                       "video_exts": ".mp4"})
+    ev = {c["channel"]: c for c in M.evaluate(cfg)["channels"]}
+    eq(ev["CamA"]["online_str"], "30 分钟", "ok 通道显示在线时长")
+
+    # 断流中的通道不在线 → —
+    d2 = os.path.join(root, "CamB", "profile_1",
+                      (datetime.now() - timedelta(hours=5)).strftime("%Y%m%d"))
+    os.makedirs(d2, exist_ok=True)
+    touch(os.path.join(d2, "a.mp4"), now - 5 * 3600)
+    ev = {c["channel"]: c for c in M.evaluate(cfg)["channels"]}
+    eq(ev["CamB"]["status"], "silent", "CamB 断流")
+    eq(ev["CamB"]["online_str"], "—", "断流通道在线时长显示 —")
+
+    # 窗口内一直连续且窗口被截断（更早还有数据）→ capped → ">N 天"
+    d3 = os.path.join(root, "CamC", "profile_1", datetime.now().strftime("%Y%m%d"))
+    os.makedirs(d3, exist_ok=True)
+    for i in range(181):                       # 最近 3 小时每分钟一个，同一天内
+        touch(os.path.join(d3, "c%03d.mp4" % i), now - (180 - i) * 60)
+    secs, capped = M.online_streak(os.path.join(root, "CamC"), exts, int(now))
+    eq(capped, False, "只有 1 天数据、窗口没截断 → 不封顶，显示真实时长")
+    ok(179 * 60 <= secs <= 181 * 60, "CamC 在线时长 ≈ 3 小时", secs)
+    # 再补一个昨天的日期目录：这时 2 个目录，窗口=1 天会扫「今天+昨天」，正好扫完 → 不封顶
+    dy = os.path.join(root, "CamC", "profile_1",
+                      (datetime.now() - timedelta(days=1)).strftime("%Y%m%d"))
+    os.makedirs(dy, exist_ok=True)
+    touch(os.path.join(dy, "y.mp4"), now - 86400)
+    old_days = M.ONLINE_STREAK_DAYS
+    try:
+        # 现在 2 个目录，窗口=1 天 → 扫「今天+昨天」正好扫完 → 不封顶
+        M.ONLINE_STREAK_DAYS = 1
+        secs, capped = M.online_streak(os.path.join(root, "CamC"), exts, int(now))
+        eq(capped, False, "今天+昨天都扫完，没有更早数据 → 不封顶")
+        ok(179 * 60 <= secs <= 181 * 60, "跨零点的连续不被误判成断点", secs)
+    finally:
+        M.ONLINE_STREAK_DAYS = old_days
+    # 再补前天：窗口=1 天时扫到「今天+昨天」之外还有前天 → 截断 → 封顶
+    d2 = os.path.join(root, "CamC", "profile_1",
+                      (datetime.now() - timedelta(days=2)).strftime("%Y%m%d"))
+    os.makedirs(d2, exist_ok=True)
+    touch(os.path.join(d2, "z.mp4"), now - 2 * 86400)
+    old_days = M.ONLINE_STREAK_DAYS
+    try:
+        # 窗口 = 1 天：现在 3 个日期目录（今天/昨天/前天），扫 max_days+1=2 个后还有更早 → 截断
+        M.ONLINE_STREAK_DAYS = 1
+        ms, tr = M._recent_mtimes(os.path.join(root, "CamC"), exts, 1)
+        eq(tr, True, "窗口+1 天之外还有更早数据 → 截断标记为真")
+        ok(len(ms) == 181 + 1, "多扫一个目录只为覆盖最老那天的边界", len(ms))
+        ev = {c["channel"]: c for c in M.evaluate(cfg)["channels"]}
+        eq(ev["CamC"]["online_str"], "3 小时", "最老那天是部分覆盖的，不拿它当断点 → 显示真实时长")
+        # 窗口 = 2 天 → 扫「今天+昨天+前天」正好扫完，没有更早 → 不封顶
+        M.ONLINE_STREAK_DAYS = 2
+        secs, capped = M.online_streak(os.path.join(root, "CamC"), exts, int(now))
+        eq(capped, False, "全部日期目录都扫到 → 不封顶（不受最老那天部分覆盖影响）")
+    finally:
+        M.ONLINE_STREAK_DAYS = old_days
+
+    # fmt_duration 各档位
+    eq(M.fmt_duration(30), "不足 1 分钟", "格式化：不足 1 分钟")
+    eq(M.fmt_duration(3600), "1 小时", "格式化：整小时")
+    eq(M.fmt_duration(5400), "1 小时 30 分", "格式化：小时+分")
+    eq(M.fmt_duration(172800), "2 天", "格式化：整天")
+    eq(M.fmt_duration(180000), "2 天 2 小时", "格式化：天+小时")
+
+    # camera 布局聚合两个 profile 的 mtime 算 streak
+    now2 = time.time()
+    for prof in ("profile_1", "profile_2"):
+        dp = os.path.join(root, "CamD", prof, datetime.now().strftime("%Y%m%d"))
+        os.makedirs(dp, exist_ok=True)
+        for i in range(3):                     # 每个 profile 各 3 个、错开 2 分钟，聚合后间隔 ≤ 2 分钟
+            touch(os.path.join(dp, "x%d.mp4" % i),
+                  now2 - (5 - i * 2) * 60 - (0 if prof == "profile_1" else 60))
+    secs, capped = M.online_streak(os.path.join(root, "CamD"), exts, int(now2))
+    ok(5 * 60 <= secs <= 7 * 60 and not capped,
+       "camera 布局聚合两个 profile 的 mtime 算在线时长（单 profile 只有 4 分钟）", secs)
+
+    # 封顶：最近几天全部连续（每分钟一个文件、按整分钟连续排列，天与天之间不断）
+    now3 = time.time()
+    base = int(now3) - 5 * 86400             # 5 天前开始，每分钟一个文件，连到刚刚
+    for i in range(5 * 24 * 60):
+        ts = base + i * 60
+        day = datetime.fromtimestamp(ts).strftime("%Y%m%d")
+        dp = os.path.join(root, "CamE", "profile_1", day)
+        os.makedirs(dp, exist_ok=True)
+        touch(os.path.join(dp, "e%06d.mp4" % i), ts)
+    old_days = M.ONLINE_STREAK_DAYS
+    try:
+        M.ONLINE_STREAK_DAYS = 3
+        secs, capped = M.online_streak(os.path.join(root, "CamE"), exts, int(now3))
+        eq(capped, True, "3 天内全连续、更早还有数据 → 封顶")
+        ev = {c["channel"]: c for c in M.evaluate(cfg)["channels"]}
+        eq(ev["CamE"]["online_str"], ">3 天", "封顶显示 >3 天")
+    finally:
+        M.ONLINE_STREAK_DAYS = old_days
+
+
 def test_normalize_keeps_secret():
     # 设置页「留空=不修改」：apply_wizard 的语义在 config.normalize 里也要成立
     C.save_config({"dingtalk_webhook": "https://a/b", "dingtalk_secret": "SEC1"})
@@ -423,7 +541,7 @@ def main():
     srv, webhook = start_mock()
     try:
         for fn in (test_config_types, test_config_io, test_channels_and_evaluate,
-                   test_easynvr_layout,
+                   test_easynvr_layout, test_online_streak,
                    test_scan_alert_and_silence, test_daily_schedule, test_report_text,
                    test_normalize_keeps_secret):
             fn()

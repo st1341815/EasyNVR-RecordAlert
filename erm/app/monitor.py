@@ -98,6 +98,13 @@ DATE_RE = re.compile(r"^(\d{8})(?:[_-].*)?$")
 # 日期目录最多往回看多少天：够覆盖最长的录像保留期，又不至于每次扫描翻遍整棵树
 LOOKBACK_DIRS = 120
 
+# 在线时长（连续录像）口径：
+#   从最新录像文件往回，相邻文件 mtime 间隔都 <= ONLINE_GAP_SECONDS 视为连续在线；
+#   EasyNVR 正常约 1~2 分钟一个分段，5 分钟足够包容偶发的写入延迟。
+#   只往回看 ONLINE_STREAK_DAYS 天：断流点在窗口之前时显示 ">3 天"，不必翻整棵树。
+ONLINE_GAP_SECONDS = 300
+ONLINE_STREAK_DAYS = 3
+
 
 def _subdirs(path):
     out = []
@@ -254,6 +261,122 @@ def scan_channel(path, exts, window=None):
     return {"latest": latest, "total": total, "in_window": inw}
 
 
+# ---------------------------------------------------------------- 在线时长
+
+def _flat_mtimes(d, exts):
+    """单层目录里所有录像文件的 mtime 列表。"""
+    out = []
+    try:
+        with os.scandir(str(d)) as it:
+            for e in it:
+                try:
+                    if not e.is_file(follow_symlinks=False):
+                        continue
+                    if os.path.splitext(e.name)[1].lower() not in exts:
+                        continue
+                    out.append(int(e.stat(follow_symlinks=False).st_mtime))
+                except OSError:
+                    continue
+    except (OSError, PermissionError):
+        pass
+    return out
+
+
+def _recent_mtimes(path, exts, max_days=None, _depth=0):
+    """(最近若干天的录像文件 mtime 倒序列表, 窗口外是否还有更早的数据)。
+
+    截断（truncated）= 我们扫的这段之外还有更早的日期目录 —— 只有这种情况
+    「窗口内没找到断点」才说明断点在更早之前（显示 ">N 天"）；
+    否则说明录像本来就没多久，显示真实时长。
+
+    窗口取 max_days 天，另外**多扫一个日期目录**：最老那天是部分覆盖的，
+    跨零点的连续录像落在它里面会被误判成断点。
+
+    camera 布局传进来的是摄像头目录（下一层是 profile_N），要聚合所有 profile；
+    profile 布局传进来的是 profile 目录（下一层就是日期目录）。其余非常规布局
+    只把目录本身当一层扫，不递归深挖 —— 在线时长只要最近几天，够用即可。
+    """
+    path = Path(path)
+    if max_days is None:
+        max_days = ONLINE_STREAK_DAYS
+    subs = _subdirs(path)
+    dated = sorted((d for d in subs if DATE_RE.match(d.name)),
+                   key=lambda d: d.name, reverse=True)
+    if dated:
+        # 最老那天是部分覆盖的，它的「日期边界」不等于「录像边界」：
+        #  · 被截断时 → 跨零点的连续长会停在边界，往后多扫一个目录凑够覆盖范围；
+        #  · 不截断 → 一路扫到最早，本来就没有边界问题。
+        # 所以只有截断时才多扫一个。
+        truncated = len(dated) > max_days + 1
+        today = datetime.now().strftime("%Y%m%d")
+        if dated[0].name[:8] != today:          # 近期没有录像：覆盖范围到最老那天为止
+            truncated = True
+        dirs = dated[:max_days + (1 if truncated else 0)]
+    elif _depth == 0 and subs:
+        out, truncated = [], False
+        for s in subs:                          # 摄像头目录 → 各 profile_N
+            ms, tr = _recent_mtimes(s, exts, max_days, _depth=1)
+            out.extend(ms)
+            truncated = truncated or tr
+        out.sort(reverse=True)
+        return out, truncated
+    else:
+        dirs = [path]                           # 没有日期目录：文件直接放这层
+        truncated = False
+    out = []
+    for d in dirs:
+        out.extend(_flat_mtimes(d, exts))
+    out.sort(reverse=True)
+    return out, truncated
+
+
+def online_streak(path, exts, latest):
+    """在线时长（秒, 是否封顶为 ">N 天"）。
+
+    从最新录像往回找第一个「间隔 > ONLINE_GAP_SECONDS」的断点；
+    窗口内没找到断点且窗口被截断（更早还有数据）→ capped=True。
+    """
+    mtimes, truncated = _recent_mtimes(path, exts)
+    if not mtimes:
+        return 0, False
+    if latest:
+        latest = int(latest)
+        start = min(mtimes[0], latest)          # mtime 可能被改写（拷贝/rsync），以扫描值为准
+    else:
+        start = mtimes[0]
+    first = start
+    for m in mtimes:
+        if start - m > ONLINE_GAP_SECONDS:
+            break
+        start = m
+    else:                                       # 窗口内全部连续
+        return max(0, first - start), truncated
+    return max(0, first - start), False
+
+
+def fmt_duration(seconds):
+    """在线时长的展示格式：不足 1 分钟 / N 分钟 / H 小时 M 分 / D 天 H 小时。"""
+    seconds = int(seconds)
+    if seconds < 60:
+        return "不足 1 分钟"
+    m = seconds // 60
+    if m < 60:
+        return "%d 分钟" % m
+    h = m // 60
+    if h < 48:
+        return ("%d 小时 %d 分" % (h, m % 60)) if m % 60 else "%d 小时" % h
+    d = h // 24
+    return ("%d 天 %d 小时" % (d, h % 24)) if h % 24 else "%d 天" % d
+
+
+def online_text(path, exts, latest):
+    """通道正在录像时的在线时长文本；异常/无录像时返回 None（前端显示 —）。"""
+    secs, capped = online_streak(path, exts, latest)
+    if capped:
+        return ">%d 天" % ONLINE_STREAK_DAYS
+    return fmt_duration(secs)
+
+
 def evaluate(cfg, now=None, with_counts=True, window=None):
     """逐个通道判定，页面与告警逻辑共用。"""
     now_dt_ = now or now_dt(cfg)
@@ -289,7 +412,7 @@ def evaluate(cfg, now=None, with_counts=True, window=None):
         item = {"channel": ch["channel"], "label": ch["label"], "path": ch["path"],
                 "layout": ch.get("layout"), "profiles": ch.get("profiles") or [],
                 "status": "ok", "latest": 0, "latest_str": "—", "idle_min": None,
-                "files": 0, "files_window": 0}
+                "online_str": "—", "files": 0, "files_window": 0}
         if not path.exists() or not path.is_dir():
             item["status"] = "missing"
         elif not os.access(str(path), os.R_OK | os.X_OK):
@@ -305,6 +428,8 @@ def evaluate(cfg, now=None, with_counts=True, window=None):
                 item["idle_min"] = max(0, (now_ts - sc["latest"]) // 60)
                 item["status"] = "silent" if (now_ts - sc["latest"]) >= threshold_s else "ok"
                 item["latest_str"] = fmt_ts(cfg, sc["latest"])
+                if item["status"] == "ok":      # 正在录像才算在线；断流/无录像显示 —
+                    item["online_str"] = online_text(path, exts, sc["latest"]) or "—"
         item["label"] = ch["label"]
         item["tag"] = STATUS_LABEL.get(item["status"], item["status"])
         item["alert"] = item["status"] != "ok"

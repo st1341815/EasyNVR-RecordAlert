@@ -130,6 +130,10 @@
     <h2>通道状态</h2>
     <div id="chanBox"><div class="empty">尚未检测</div></div>
     <div class="hint" id="rootErr"></div>
+    <div class="notes">
+      · 在线时长 = 从最新录像往回、相邻文件间隔不超过 <b>5 分钟</b> 的连续录像时长；
+      超过 3 天未断流显示 <code>&gt;3 天</code>。通道断流 / 无录像时显示 <code>—</code>。
+    </div>
   </div>
 
   <form id="cfgForm" onsubmit="return false">
@@ -280,7 +284,7 @@ function renderChannels(d){
     return;
   }
   let html = '<table class="chan"><thead><tr><th>通道</th><th>目录</th><th>状态</th>' +
-             '<th>最新录像</th><th>已闲置</th><th>文件数</th></tr></thead><tbody>';
+             '<th>最新录像</th><th>在线时长</th><th>已闲置</th><th>文件数</th></tr></thead><tbody>';
   for (const c of chans) {
     const same = !c.label || c.label === c.channel;
     html += '<tr>' +
@@ -289,6 +293,7 @@ function renderChannels(d){
                 (same ? '—' : esc(c.channel)) + '</td>' +
             '<td data-label="状态">' + tagFor(c) + '</td>' +
             '<td class="num" data-label="最新录像">' + esc(c.latest_str) + '</td>' +
+            '<td class="num" data-label="在线时长">' + esc(c.online_str || '—') + '</td>' +
             '<td class="num" data-label="已闲置">' + (c.idle_min == null ? '—' : c.idle_min + ' 分钟') + '</td>' +
             '<td class="num" data-label="文件数">' + (c.files || 0) + '</td></tr>';
   }

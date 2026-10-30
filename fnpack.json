@@ -28,8 +28,19 @@
       "install_type": "",
       "is_docker": false,
       "service_port": "",
-      "details_updated_at": "2026-10-29T19:06:00+08:00",
+      "details_updated_at": "2026-10-30T15:15:00+08:00",
       "releases": {
+        "1.0.11": {
+          "changelog": "通道状态表新增「在线时长」列（位于「最新录像」与「已闲置」之间）：从最新录像往回、相邻文件间隔不超过 5 分钟的连续录像时长；超过 3 天未断流显示 >3 天；断流或无录像时显示 —。",
+          "updated_at": "2026-10-30T15:15:00+08:00",
+          "packages": {
+            "all": {
+              "download_url": "https://github.com/st1341815/EasyNVR-RecordAlert/releases/download/v1.0.11/EasyNVR-RecordAlert-1.0.11.fpk",
+              "sha256": "0cc52c4b1d0788952424d826dd09b9cbcf6ae4cde5d9be98e0a6fe696af9ba78",
+              "size": 49941
+            }
+          }
+        },
         "1.0.10": {
           "changelog": "推送渠道按需展开：勾选「钉钉/飞书/企业微信」才显示对应的 Webhook 填写框（钉钉另显示加签密钥），都不勾时只显示一行提示；取消勾选不清空已填内容，重新勾选即恢复显示。",
           "updated_at": "2026-10-29T19:06:00+08:00",

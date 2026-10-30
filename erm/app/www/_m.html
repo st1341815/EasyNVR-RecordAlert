@@ -1,0 +1,98 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=375"><style>
+  :root{
+    --bg:#f6f4ef; --card:#fffdf9; --ink:#23262b; --muted:#6b7280;
+    --line:#e3ded4; --brand:#3f6f5f; --brand-soft:#e9f0ec;
+    --warn:#8a5a00; --warn-bg:#fdf3dd; --danger:#a33a2e; --danger-bg:#fbebe8;
+    --ok:#2f6b46; --ok-bg:#e8f2eb; --radius:10px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:960px;margin:0 auto;padding:20px 18px 48px}
+  header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+  h1{font-size:18px;font-weight:650;margin:0;letter-spacing:.2px}
+  .ver{font-size:12px;color:var(--muted)}
+  .pill{font-size:12px;padding:2px 9px;border-radius:999px;border:1px solid var(--line);
+        background:#fff;color:var(--muted)}
+  .pill.ok{background:var(--ok-bg);color:var(--ok);border-color:#cfe2d6}
+  .pill.bad{background:var(--danger-bg);color:var(--danger);border-color:#efd2cd}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+        padding:16px;margin-bottom:14px}
+  .card h2{font-size:13px;font-weight:650;margin:0 0 12px;color:var(--muted);
+           letter-spacing:.6px;text-transform:uppercase}
+  .meta{display:flex;gap:18px;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}
+  .meta b{color:var(--ink);font-weight:600}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  button{font:inherit;padding:7px 14px;border-radius:8px;border:1px solid var(--line);
+         background:#fff;color:var(--ink);cursor:pointer}
+  button:hover{background:#f3f0e9}
+  button.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+  button.primary:hover{filter:brightness(1.06)}
+  button:disabled{opacity:.55;cursor:default}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{font-size:12px;color:var(--muted);font-weight:600;text-align:left;
+     padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:8px;border-bottom:1px solid #f0ece3;white-space:nowrap}
+  td.num{font-variant-numeric:tabular-nums}
+  .tag{font-size:12px;padding:1px 8px;border-radius:999px}
+  .tag.ok{background:var(--ok-bg);color:var(--ok)}
+  .tag.bad{background:var(--danger-bg);color:var(--danger)}
+  .tag.mid{background:var(--warn-bg);color:var(--warn)}
+  .empty{color:var(--muted);font-size:13px;padding:8px 0}
+  form .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+  label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:4px}
+  input[type=text],input[type=number],input[type=time],select,textarea{
+    width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:8px;
+    background:#fff;color:var(--ink);font:inherit}
+  input:focus{outline:2px solid var(--brand-soft);border-color:var(--brand)}
+  .checks{display:flex;gap:16px;flex-wrap:wrap;margin-top:6px}
+  .checks label{display:flex;align-items:center;gap:6px;margin:0;color:var(--ink);font-size:13px}
+  .push-field[hidden]{display:none}
+  .hint{font-size:12px;color:var(--muted);margin-top:6px}
+  .notes{font-size:12px;color:var(--muted);line-height:1.75;margin-top:14px;
+         padding-top:12px;border-top:1px dashed var(--line)}
+  .notes code{font-size:11.5px;background:#f3f0e9;border-radius:4px;padding:1px 5px}
+  .msg{margin-top:10px;font-size:13px;padding:9px 11px;border-radius:8px;
+       border:1px solid var(--line);background:#fff;white-space:pre-wrap;display:none}
+  .msg.show{display:block}
+  .msg.ok{background:var(--ok-bg);border-color:#cfe2d6;color:var(--ok)}
+  .msg.bad{background:var(--danger-bg);border-color:#efd2cd;color:var(--danger)}
+  .msg.warn{background:var(--warn-bg);border-color:#eeddb4;color:var(--warn)}
+  pre{background:#26292e;color:#e6e3dc;padding:12px;border-radius:8px;overflow:auto;
+      font-size:12px;line-height:1.5;max-height:340px;margin:0}
+  details summary{cursor:pointer;font-size:13px;color:var(--muted);font-weight:600}
+  .flex-between{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+  /* ---------- 手机端（≤640px） ---------- */
+  @media (max-width: 640px) {
+    .wrap{padding:14px 12px 40px}
+    h1{font-size:16px}
+    /* 兜底：任何宽内容都不许顶出屏幕 */
+    .card{overflow-x:auto;-webkit-overflow-scrolling:touch}
+    /* 通道表 → 一个通道一张小卡 */
+    table.chan{width:100%;border-collapse:collapse}
+    table.chan thead{display:none}
+    table.chan tr{display:block;padding:10px 2px 12px;border-bottom:1px solid #f0ece3}
+    table.chan tr:last-child{border-bottom:0}
+    table.chan td{display:flex;justify-content:space-between;align-items:baseline;gap:14px;
+                  padding:3px 0;border:0;white-space:normal;word-break:break-word;text-align:right}
+    table.chan td::before{content:attr(data-label);color:var(--muted);font-size:12.5px;
+                          flex:0 0 auto;text-align:left}
+    table.chan td[data-label=""]::before{content:none}
+    table.chan td.c-name{font-weight:650;font-size:14px;text-align:left;padding-bottom:6px}
+    table.chan td.c-name::before{content:none}
+    table.chan td.c-dir{color:var(--muted);font-size:12.5px}
+    /* 目录与通道相同时（无别名）手机上不占一行 */
+    table.chan td.c-dir:empty,.chan td.c-dir[data-same="1"]{display:none}
+    /* 表单与按钮 */
+    .grid{grid-template-columns:1fr !important}
+    input[type=text],input[type=number],input[type=time],select,textarea{font-size:16px}
+    button{padding:9px 14px}
+    .meta{gap:10px 16px;font-size:12px}
+    .meta b{display:inline}
+    pre{font-size:11.5px}
+  }
+
+</style></head><body><div class="wrap"><div class="card"><h2>通道状态</h2><table class="chan"><tbody>
+<tr><td class="c-name" data-label="">大门</td><td class="num c-dir" data-label="目录">O27fqV6dYvs3T</td><td data-label="状态">正常</td><td class="num" data-label="最新录像">2026-10-30 15:10:35</td><td class="num" data-label="在线时长">24 小时 45 分</td><td class="num" data-label="已闲置">0 分钟</td><td class="num" data-label="文件数">5507</td></tr>
+<tr><td class="c-name" data-label="">客厅</td><td class="num c-dir" data-label="目录">Ou5Rv3hRv7gaU</td><td data-label="状态">正常</td><td class="num" data-label="最新录像">2026-10-30 15:10:53</td><td class="num" data-label="在线时长">24 小时 47 分</td><td class="num" data-label="已闲置">0 分钟</td><td class="num" data-label="文件数">5431</td></tr>
+</tbody></table></div></div></body></html>

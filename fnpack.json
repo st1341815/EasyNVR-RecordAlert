@@ -28,8 +28,19 @@
       "install_type": "",
       "is_docker": false,
       "service_port": "",
-      "details_updated_at": "2026-10-30T15:15:00+08:00",
+      "details_updated_at": "2026-10-30T15:55:00+08:00",
       "releases": {
+        "1.0.12": {
+          "changelog": "在线时长改为显示真实连续录像时长并按档位格式化：不足 100 小时显示小时/分钟，满 100 小时转成「天/时」，满 100 天转成「月/天/时」（1 月按 30 天）；取消 >3 天封顶。",
+          "updated_at": "2026-10-30T15:55:00+08:00",
+          "packages": {
+            "all": {
+              "download_url": "https://github.com/st1341815/EasyNVR-RecordAlert/releases/download/v1.0.12/EasyNVR-RecordAlert-1.0.12.fpk",
+              "sha256": "33c375b898ccb1bff98d526c72518eeffb47d4f560b426d996289dd0323e7d82",
+              "size": 50354
+            }
+          }
+        },
         "1.0.11": {
           "changelog": "通道状态表新增「在线时长」列（位于「最新录像」与「已闲置」之间）：从最新录像往回、相邻文件间隔不超过 5 分钟的连续录像时长；超过 3 天未断流显示 >3 天；断流或无录像时显示 —。",
           "updated_at": "2026-10-30T15:15:00+08:00",

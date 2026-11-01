@@ -42,14 +42,28 @@ DEFAULT_CONFIG = {
     "dingtalk_secret": "",             # 钉钉「加签」密钥；用「自定义关键词」时留空
     "feishu_webhook": "",
     "wechat_webhook": "",
+    # 邮件（SMTP 直发）。飞牛系统自带的「通知邮箱」不对外提供发送接口，
+    # 所以这里自己连 SMTP；想用同一个邮箱，就把授权码在这里再填一次。
+    "email_smtp_host": "",             # 如 smtp.qq.com / smtp.163.com
+    "email_smtp_port": 465,            # 465=SSL  587/25=STARTTLS（按加密方式自动纠正）
+    "email_smtp_security": "ssl",      # ssl | starttls | none
+    "email_smtp_user": "",             # 登录账号（一般是邮箱地址）
+    "email_smtp_pass": "",             # 授权码/应用专用密码（不是登录密码）
+    "email_from": "",                  # 发件人，空 = 用 email_smtp_user
+    "email_to": [],                    # 收件人列表
+    "email_subject_prefix": "[EasyNVR 录像监控]",
     # 录像文件后缀（EasyNVR 默认 mp4；HLS 模式会有 .ts）
     "video_exts": [".mp4", ".ts", ".mov", ".mkv", ".flv", ".avi", ".m4v", ".mpg", ".mpeg"],
     # 时区：告警时间文案与「昨天」的边界都按它算
     "timezone": "Asia/Shanghai",
 }
 
-PUSH_CHANNELS = ("dingtalk", "feishu", "wechat")
-PUSH_LABEL = {"dingtalk": "钉钉", "feishu": "飞书", "wechat": "企业微信"}
+PUSH_CHANNELS = ("dingtalk", "feishu", "wechat", "email")
+PUSH_LABEL = {"dingtalk": "钉钉", "feishu": "飞书", "wechat": "企业微信", "email": "电子邮件"}
+
+# 邮件加密方式 → 默认端口（用户只改加密方式时把端口纠正到该协议的标准端口）
+SMTP_SECURITY_PORTS = {"ssl": 465, "starttls": 587, "none": 25}
+SMTP_SECURITIES = tuple(SMTP_SECURITY_PORTS)
 
 
 def _app_var() -> Path:
@@ -72,7 +86,9 @@ def as_int(value, default, lo=None, hi=None):
     try:
         n = int(str(value).strip())
     except (TypeError, ValueError):
-        return default
+        # 转换失败时 default 也要过一遍 clamp，否则会出现「默认值 25 被夹成 1」
+        # （as_int("abc", 25, 1, 65535) 曾经返回 1）。default 本来就该是合法值。
+        n = default
     if lo is not None:
         n = max(n, lo)
     if hi is not None:
@@ -146,6 +162,40 @@ def norm_hhmm(value, default="08:00"):
     return "%02d:%02d" % (h, m)
 
 
+def is_mail_addr(value) -> bool:
+    """够用的邮箱校验：有且只有一个 @，两边都不空，域名带点。不追求 RFC 完备。"""
+    s = str(value or "").strip().strip("<>").strip()
+    if not s or s.count("@") != 1:
+        return False
+    local, _, domain = s.partition("@")
+    if not local or not domain or "." not in domain:
+        return False
+    if any(ch in s for ch in " \t\r\n,;，；"):
+        return False
+    return True
+
+
+def _norm_mail_list(value):
+    """收件人：支持 'a@x.com, b@y.com' / 每行一个 / 列表。非法项直接丢掉并去重。
+
+    不走 as_list：那个只认逗号/分号，收件人常按行分行写（表单是多行文本框）。
+    """
+    if isinstance(value, (list, tuple, set)):
+        raw = list(value)
+    else:
+        text = str(value or "").replace("，", ",").replace("；", ",")
+        text = text.replace(";", ",").replace("\r", "\n")
+        raw = []
+        for line in text.split("\n"):
+            raw.extend(line.split(","))
+    out = []
+    for item in raw:
+        addr = str(item).strip().strip("<>").strip()
+        if addr and is_mail_addr(addr) and addr not in out:
+            out.append(addr)
+    return out
+
+
 def normalize(raw):
     """把任意来源的 dict 归一成强类型配置。"""
     cfg = dict(DEFAULT_CONFIG)
@@ -178,6 +228,33 @@ def normalize(raw):
 
     for key in ("dingtalk_webhook", "dingtalk_secret", "feishu_webhook", "wechat_webhook", "timezone"):
         cfg[key] = str(cfg.get(key) or "").strip()
+
+    # ---- 邮件 ----
+    # 兼容常见写法：端口填 "465" / 带空格 / 带协议前缀（smtps://smtp.qq.com）
+    host = str(cfg.get("email_smtp_host") or "").strip()
+    for prefix in ("smtps://", "smtp://", "https://", "http://"):
+        if host.lower().startswith(prefix):
+            host = host[len(prefix):]
+    host = host.strip().rstrip("/")
+    if "/" in host:                     # 只保留主机名，丢掉误粘的路径
+        host = host.split("/", 1)[0]
+    cfg["email_smtp_host"] = host
+
+    sec = str(cfg.get("email_smtp_security") or "ssl").strip().lower()
+    if sec in ("tls", "start_tls", "smtp", "plain-tls"):
+        sec = "starttls"
+    if sec in ("plain", "no", "off", "close"):
+        sec = "none"
+    cfg["email_smtp_security"] = sec if sec in SMTP_SECURITIES else "ssl"
+    cfg["email_smtp_port"] = as_int(cfg.get("email_smtp_port"),
+                                    SMTP_SECURITY_PORTS[cfg["email_smtp_security"]], 1, 65535)
+    cfg["email_smtp_user"] = str(cfg.get("email_smtp_user") or "").strip()
+    # 授权码按原样保留（部分邮箱的授权码里没有空格，但 Gmail 应用密码含空格，不能 strip 掉中间）
+    cfg["email_smtp_pass"] = str(cfg.get("email_smtp_pass") or "").strip()
+    cfg["email_from"] = str(cfg.get("email_from") or "").strip()
+    cfg["email_to"] = _norm_mail_list(cfg.get("email_to"))
+    cfg["email_subject_prefix"] = (str(cfg.get("email_subject_prefix") or "").strip()
+                                   or DEFAULT_CONFIG["email_subject_prefix"])
 
     exts = []
     for e in as_list(cfg.get("video_exts")):

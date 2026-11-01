@@ -8,7 +8,7 @@
 <录像根目录>/<摄像头随机ID>/profile_<通道号>/<YYYYMMDD>/20261029000315-62000.mp4
 例：/vol3/1000/NVR/easynvr_rec/O27fqV6dYvs3T/profile_1/20261029/20261029000315-62000.mp4
 ```
-支持钉钉（含「加签」）、飞书、企业微信；通道按上面的真实目录结构**自动发现**（无需填写通道清单或通配规则）；配置改动即时生效。
+支持钉钉（含「加签」）、飞书、企业微信、电子邮件（SMTP 直发）；通道按上面的真实目录结构**自动发现**（无需填写通道清单或通配规则）；配置改动即时生效。
 
 本工程是「文档评审 → 重写 → 真机实测」的产物，**不是**原文档那份代码的补丁版：
 原文档在平台接入层（manifest / wizard / privilege / 路径 / 状态返回码 / 依赖安装）和核心逻辑
@@ -204,6 +204,11 @@ PYTHONPATH= python3 check_fnpack.py     # 期望 FNPCK_OK（31 项）
   阈值要调小（10 分钟左右），日报的"文件数"也不能当"录像条数"看。
 - **摄像头名字**：EasyNVR 把通道名存在自己的数据库里，目录里只有随机 ID，应用读不到。
   想看到「大门」而不是 `O27fqV6dYvs3T`，就在页面上填「摄像头别名」。
+- **电子邮件渠道要自己有 SMTP**：飞牛系统自带的「通知邮箱」不对外提供发送接口
+  （凭据在 SAC 里加密存储、发送走 WebUI 内 CGI、推送总线 socket 仅 root 可读，
+  开放平台也没有邮件/通知 API），所以本应用是用 `smtplib` 自己连 SMTP。
+  **想用系统里那个邮箱，就在应用里把同一账号 + 授权码再填一次。**
+  QQ/163/126 等必须用「授权码」而不是登录密码。
 - **升级路径**：`appcenter-cli install-fpk` 对已安装应用直接返回「已安装」，不走升级；
   命令行下要升级只能 `uninstall` + `install`（会清空授权目录，需重新授权）。应用中心 UI 的升级按钮未验证。
 - **重装数据**：`$TRIM_PKGVAR` 保留（config.json 沿用），但 `state.json` 实测会消失 →
@@ -213,7 +218,7 @@ PYTHONPATH= python3 check_fnpack.py     # 期望 FNPCK_OK（31 项）
 
 ## 8. 自检覆盖
 
-`selftest.py` 79 项断言，重点回归原文档的每个坑：
+`selftest.py` 96 项断言，重点回归原文档的每个坑：
 
 | 断言 | 对应问题 |
 | --- | --- |
@@ -225,3 +230,24 @@ PYTHONPATH= python3 check_fnpack.py     # 期望 FNPCK_OK（31 项）
 | HTTP 200 + errcode=310000 → 判失败 | "已推送"其实没发出去 |
 | 加签 sign 与官方算法逐位一致 | 钉钉「加签」 |
 | config 0600 / 原子写无残留 | webhook 泄露与半截 JSON |
+
+### 邮件渠道单独自检
+
+`selftest_email.py`（59 项）会起**本地假 SMTP 服务器**、真跑 `smtplib`：
+
+| 断言 | 覆盖 |
+| --- | --- |
+| 三种加密方式 | SSL(465，自签证书) / STARTTLS(587) / 明文(25) |
+| 535 / 550 / 连接被拒 / 不支持 STARTTLS | 失败原因必须说清，不能记成已发送 |
+| 收件人 `a,b；c` + 换行 + 非法项 | 拆分与去重（`as_list` 不认换行，已改专用函数） |
+| 主题 = 前缀 + 正文首行（跳过 `│ ─`） | 告警邮件一眼看清单是哪路挂了 |
+| `as_int("abc", 25, 1, 65535) == 25` | 默认值不能被 clamp 夹坏（既有 bug） |
+
+`e2e_email.py`（13 项）：真起网关（unix socket）+ 假 SMTP，走 HTTP API 走完
+「保存配置 → 测试推送 → 自检」，确认存储与调用链路都通。
+
+```bash
+PYTHONPATH= python3 selftest.py        # 96 项 SELFTEST_ERM_OK
+PYTHONPATH= python3 selftest_email.py  # 59 项
+PYTHONPATH= python3 e2e_email.py       # 13 项 E2E_EMAIL_OK
+```

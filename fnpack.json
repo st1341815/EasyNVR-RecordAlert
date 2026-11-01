@@ -28,8 +28,19 @@
       "install_type": "",
       "is_docker": false,
       "service_port": "",
-      "details_updated_at": "2026-10-30T15:55:00+08:00",
+      "details_updated_at": "2026-11-01T12:50:00+08:00",
       "releases": {
+        "1.0.13": {
+          "changelog": "新增「电子邮件」推送渠道（SMTP 直发，标准库 smtplib，无第三方依赖）：支持 SSL(465)/STARTTLS(587)/明文(25) 三种加密方式，收件人可多个（逗号或换行分隔），发件人留空则用登录账号；主题自动拼前缀 + 告警正文首行；发送失败（连接/鉴权/收件人/正文被拒）会给出可读原因与 SMTP 返回码，不会「假装已发送」。说明：飞牛系统自带的「通知邮箱」不对外提供发送接口，故本应用自己连 SMTP；想复用同一个邮箱，把授权码在应用里再填一次即可。",
+          "updated_at": "2026-11-01T12:50:00+08:00",
+          "packages": {
+            "all": {
+              "download_url": "https://github.com/st1341815/EasyNVR-RecordAlert/releases/download/v1.0.13/EasyNVR-RecordAlert-1.0.13.fpk",
+              "sha256": "fd8561eae98cfa3ff02ff74807aeea4bd1db95f9b5b4b94bcc5f0822ba83126c",
+              "size": 55807
+            }
+          }
+        },
         "1.0.12": {
           "changelog": "在线时长改为显示真实连续录像时长并按档位格式化：不足 100 小时显示小时/分钟，满 100 小时转成「天/时」，满 100 天转成「月/天/时」（1 月按 30 天）；取消 >3 天封顶。",
           "updated_at": "2026-10-30T15:55:00+08:00",

@@ -41,6 +41,7 @@ PUSH_MAP = [
     ("wizard_push_dingtalk", "dingtalk"),
     ("wizard_push_feishu", "feishu"),
     ("wizard_push_wechat", "wechat"),
+    ("wizard_push_email", "email"),
 ]
 
 
@@ -99,6 +100,11 @@ def main():
     if not cfg.get("enabled_push_channels"):
         warns.append("未启用任何推送渠道，告警只会写日志")
     for ch in cfg.get("enabled_push_channels") or []:
+        if ch == "email":
+            # 邮件渠道的 SMTP 参数在应用页面里填，安装向导不询问（没配就只提示）
+            if not (cfg.get("email_smtp_host") or "").strip():
+                warns.append("已启用电子邮件但 SMTP 未配置（请到应用页面填写）")
+            continue
         if not (cfg.get("%s_webhook" % ch) or "").strip():
             warns.append("已启用 %s 但 webhook 为空" % C.PUSH_LABEL.get(ch, ch))
 

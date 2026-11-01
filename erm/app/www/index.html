@@ -54,6 +54,10 @@
   .checks{display:flex;gap:16px;flex-wrap:wrap;margin-top:6px}
   .checks label{display:flex;align-items:center;gap:6px;margin:0;color:var(--ink);font-size:13px}
   .push-field[hidden]{display:none}
+  /* 端口 + 加密方式 同一行：inline-flex 保证不换行；中文 label 已在上方单独一行 */
+  .inline-group{display:flex;gap:8px;align-items:center;flex-wrap:nowrap}
+  .inline-group input[type=number]{width:6.5em;flex:0 0 auto}
+  .inline-group select{flex:1 1 auto;min-width:0}
   .hint{font-size:12px;color:var(--muted);margin-top:6px}
   .notes{font-size:12px;color:var(--muted);line-height:1.75;margin-top:14px;
          padding-top:12px;border-top:1px dashed var(--line)}
@@ -193,6 +197,7 @@
         <label><input type="checkbox" id="ch_dingtalk"> 钉钉</label>
         <label><input type="checkbox" id="ch_feishu"> 飞书</label>
         <label><input type="checkbox" id="ch_wechat"> 企业微信</label>
+        <label><input type="checkbox" id="ch_email"> 电子邮件</label>
         <label><input type="checkbox" id="notify_recovery"> 恢复时补发通知</label>
       </div>
 
@@ -212,6 +217,41 @@
         <div class="push-field" data-ch="wechat">
           <label>企业微信 Webhook</label>
           <input type="text" id="wechat_webhook" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…">
+        </div>
+        <div class="push-field" data-ch="email">
+          <label>SMTP 服务器</label>
+          <input type="text" id="email_smtp_host" placeholder="smtp.qq.com / smtp.163.com / smtp.exmail.qq.com">
+        </div>
+        <div class="push-field" data-ch="email">
+          <label>端口 + 加密方式</label>
+          <div class="inline-group">
+            <input type="number" id="email_smtp_port" placeholder="465" min="1" max="65535" style="width:7em">
+            <select id="email_smtp_security">
+              <option value="ssl">SSL（465）</option>
+              <option value="starttls">STARTTLS（587）</option>
+              <option value="none">不加密（25，仅内网）</option>
+            </select>
+          </div>
+        </div>
+        <div class="push-field" data-ch="email">
+          <label>登录账号</label>
+          <input type="text" id="email_smtp_user" placeholder="you@qq.com（一般就是邮箱地址）">
+        </div>
+        <div class="push-field" data-ch="email">
+          <label>授权码 / 应用密码</label>
+          <input type="password" id="email_smtp_pass" placeholder="QQ/163 用「授权码」，不是登录密码" autocomplete="new-password">
+        </div>
+        <div class="push-field" data-ch="email">
+          <label>发件人</label>
+          <input type="text" id="email_from" placeholder="留空 = 用登录账号">
+        </div>
+        <div class="push-field" data-ch="email">
+          <label>收件人（逗号或换行分隔）</label>
+          <textarea id="email_to" rows="2" placeholder="a@x.com, b@y.com"></textarea>
+        </div>
+        <div class="push-field" data-ch="email">
+          <label>主题前缀</label>
+          <input type="text" id="email_subject_prefix" placeholder="[EasyNVR 录像监控]">
         </div>
       </div>
       <div class="hint" id="pushEmpty">勾选上面的渠道后，这里才会出现对应的 Webhook 填写框（钉钉还会多一个「加签密钥」）。</div>
@@ -301,7 +341,7 @@ function renderChannels(d){
   box.innerHTML = html + '</tbody></table>';
 }
 
-const PUSH_CH = ['dingtalk', 'feishu', 'wechat'];
+const PUSH_CH = ['dingtalk', 'feishu', 'wechat', 'email'];
 
 /* 勾了哪个渠道，才显示它的 Webhook（钉钉额外显示加签密钥）；都没勾就只显示提示 */
 function syncPushFields(){
@@ -336,10 +376,19 @@ function fillConfig(cfg){
   set('dingtalk_secret', cfg.dingtalk_secret);
   set('feishu_webhook', cfg.feishu_webhook);
   set('wechat_webhook', cfg.wechat_webhook);
+  set('email_smtp_host', cfg.email_smtp_host);
+  set('email_smtp_port', cfg.email_smtp_port || 465);
+  set('email_smtp_security', cfg.email_smtp_security || 'ssl');
+  set('email_smtp_user', cfg.email_smtp_user);
+  set('email_smtp_pass', cfg.email_smtp_pass);
+  set('email_from', cfg.email_from);
+  set('email_to', (cfg.email_to || []).join('\n'));
+  set('email_subject_prefix', cfg.email_subject_prefix);
   const on = cfg.enabled_push_channels || [];
   $('ch_dingtalk').checked = on.includes('dingtalk');
   $('ch_feishu').checked = on.includes('feishu');
   $('ch_wechat').checked = on.includes('wechat');
+  $('ch_email').checked = on.includes('email');
   $('notify_recovery').checked = !!cfg.notify_recovery;
   syncPushFields();
 }
@@ -423,12 +472,20 @@ $('btnSave').onclick = async () => {
     alert_silence_minutes: $('alert_silence_minutes').value,
     daily_report_time: $('daily_report_time').value,
     timezone: $('timezone').value.trim() || 'Asia/Shanghai',
-    enabled_push_channels: ['dingtalk','feishu','wechat'].filter(k => $('ch_' + k).checked),
+    enabled_push_channels: ['dingtalk','feishu','wechat','email'].filter(k => $('ch_' + k).checked),
     notify_recovery: $('notify_recovery').checked,
     dingtalk_webhook: $('dingtalk_webhook').value.trim(),
     dingtalk_secret: $('dingtalk_secret').value.trim(),
     feishu_webhook: $('feishu_webhook').value.trim(),
-    wechat_webhook: $('wechat_webhook').value.trim()
+    wechat_webhook: $('wechat_webhook').value.trim(),
+    email_smtp_host: $('email_smtp_host').value.trim(),
+    email_smtp_port: $('email_smtp_port').value.trim() || 465,
+    email_smtp_security: $('email_smtp_security').value,
+    email_smtp_user: $('email_smtp_user').value.trim(),
+    email_smtp_pass: $('email_smtp_pass').value.trim(),
+    email_from: $('email_from').value.trim(),
+    email_to: $('email_to').value.split(/[\s,;，；]+/).map(s => s.trim()).filter(Boolean),
+    email_subject_prefix: $('email_subject_prefix').value.trim()
   };
   const btn = $('btnSave'); btn.disabled = true;
   try {

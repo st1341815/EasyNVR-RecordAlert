@@ -30,7 +30,7 @@ from urllib.parse import parse_qs, urlparse
 
 APP_NAME = "erm"
 GATEWAY_PREFIX = "/app/" + APP_NAME
-VERSION = "1.0.12"
+VERSION = "1.0.13"
 
 SELF = os.path.abspath(__file__)
 APP_DEST = os.path.dirname(SELF)           # app/ 的内容直接铺到 target 根
@@ -80,10 +80,40 @@ def validate(cfg):
     if not chans:
         warnings.append("没有启用任何推送渠道，告警只会写日志")
     for ch in chans:
+        if ch == "email":
+            w, e = _validate_email(cfg)
+            warnings.extend(w)
+            errors.extend(e)
+            continue
         if not (cfg.get("%s_webhook" % ch) or "").strip():
             warnings.append("已启用 %s 但 webhook 为空" % C.PUSH_LABEL.get(ch, ch))
         elif not str(cfg.get("%s_webhook" % ch)).startswith("http"):
             errors.append("%s webhook 必须以 http(s):// 开头" % C.PUSH_LABEL.get(ch, ch))
+    return warnings, errors
+
+
+def _validate_email(cfg):
+    """邮件渠道的配置体检。服务器/发件人/收件人属于「填错必然发不出去」，直接阻止保存。"""
+    warnings, errors = [], []
+    host = (cfg.get("email_smtp_host") or "").strip()
+    user = (cfg.get("email_smtp_user") or "").strip()
+    sender = (cfg.get("email_from") or "").strip() or user
+    tos = cfg.get("email_to") or []
+    if not host:
+        errors.append("已启用电子邮件但 SMTP 服务器为空")
+    elif " " in host or host.count(".") == 0:
+        errors.append("SMTP 服务器看起来不是主机名：%s" % host)
+    if not sender:
+        warnings.append("已启用电子邮件但发件人为空（多数邮箱要求发件人 = 登录账号）")
+    elif not C.is_mail_addr(sender):
+        errors.append("发件人地址无效：%s" % sender)
+    if not tos:
+        errors.append("已启用电子邮件但没有有效的收件人")
+    if not (cfg.get("email_smtp_pass") or "").strip():
+        warnings.append("SMTP 密码/授权码为空（很多邮件服务器要求鉴权，会发不出去；"
+                        "QQ/163 等要用「授权码」而不是登录密码）")
+    if user and not C.is_mail_addr(user):
+        warnings.append("SMTP 登录账号不是邮箱格式：%s（部分服务器允许，多数不允许）" % user)
     return warnings, errors
 
 
@@ -189,8 +219,11 @@ def handle_action(body, query):
         cfg = get_cfg()
         text = N.test_text(cfg)
         results = N.push_all(cfg, text)
-        if body.get("channel"):
-            results = [N.push_one(cfg, body["channel"], text)]
+        ch = body.get("channel")
+        if ch:
+            if ch not in C.PUSH_CHANNELS:
+                return {"ok": False, "error": "未知渠道：%s" % ch, "results": []}
+            results = [N.push_one(cfg, ch, text)]
         return {"ok": all(r.get("ok") for r in results), "results": results}
 
     if act == "daily_now":
@@ -257,12 +290,22 @@ def doctor_payload():
     exts = set(cfg.get("video_exts") or [])
     add("录像后缀", True, " ".join(sorted(exts)))
     for ch in cfg.get("enabled_push_channels") or []:
+        if ch == "email":
+            sec = {"ssl": "SSL", "starttls": "STARTTLS", "none": "明文"}.get(
+                cfg.get("email_smtp_security"), cfg.get("email_smtp_security"))
+            add("SMTP 服务器", bool(cfg.get("email_smtp_host")),
+                "%s:%s（%s）" % (cfg.get("email_smtp_host") or "未填写",
+                                cfg.get("email_smtp_port"), sec))
+            add("收件人", bool(cfg.get("email_to")),
+                "、".join(cfg.get("email_to") or []) or "未配置")
+            add("SMTP 授权码", True, "已配置" if cfg.get("email_smtp_pass") else "未配置")
+            continue
         add("%s webhook" % C.PUSH_LABEL.get(ch, ch), bool(cfg.get("%s_webhook" % ch)),
             C.mask_secret(cfg.get("%s_webhook" % ch)))
     add("钉钉加签密钥", True, "已配置" if cfg.get("dingtalk_secret") else "未配置（用「自定义关键词」时正常）")
     add("Python", True, "%s（%s）" % (sys.version.split()[0], sys.executable))
     return {"ok": all(c["ok"] for c in checks if c["item"] not in
-                      ("钉钉加签密钥", "录像目录已配置")), "checks": checks}
+                      ("钉钉加签密钥", "录像目录已配置", "SMTP 授权码")), "checks": checks}
 
 
 # ---------------------------------------------------------------- HTTP

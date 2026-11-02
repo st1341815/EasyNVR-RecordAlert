@@ -7,6 +7,14 @@
 于是"以为发了、其实没发"。这里统一：HTTP 状态 + 业务错误码 双重校验，
 并且支持钉钉「加签」安全设置（timestamp + HMAC-SHA256 sign）。
 
+限流（v1.0.14）：平台明确说"发太快"时做**短退避重试**。
+实测 2026-11-01 09:00 报 `code=11233 chat rate limit`、2026-11-02 09:00 报
+`code=11232 frequency limited psm[...app_platform_runtime]appID[1500]`，而同一机器人
+在 12:30 / 15:54 手动发都成功 —— 说明不是配置、不是网络，是飞书**平台侧应用级配额**
+在整点推送高峰被占满（appID 1500 是所有自定义机器人共用的内置应用）。
+只对「限流」重试；配置类错误（webhook 写错、关键词不匹配、签名错）绝不重试，
+否则真正的配置问题会被伪装成"偶发失败"。
+
 电子邮件走 SMTP 直发（smtplib，标准库）。为什么不用飞牛系统自带的「通知邮箱」：
 它的凭据在 SAC 里加密存储、发送接口是 WebUI 内的 CGI（需管理员会话），
 推送总线 socket 也只对系统模块开放（root 0600）——第三方应用拿不到；
@@ -18,11 +26,47 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
+import random
 import time
 import urllib.parse
 import urllib.request
 
 import config as C
+
+logger = logging.getLogger("erm")
+
+# ---------------------------------------------------------------- 限流重试
+
+# 各平台的「限流」错误码。注意字段名不统一（飞书/企微是 code，钉钉是 errcode）。
+RATE_LIMIT_CODES = {
+    "feishu": (11232, 11233),   # 11232 frequency limited（应用级） / 11233 chat rate limit（会话级）
+    "dingtalk": (130101,),      # 发送太快
+    "wechat": (45009,),         # api freq out of limit
+}
+# 错误码没命中时的文本兜底（平台文案偶有变化，别只认数字）
+RATE_LIMIT_HINTS = ("frequency limited", "rate limit", "too many request",
+                    "发送太快", "频率限制", "调用超过限制", "限流")
+
+# 退避计划（秒）：共 3 次尝试 = 立即 + 20s + 60s，累计约 80 秒。
+# 飞书整点高峰一般在 1~2 分钟内缓解；再长的等待交给 monitor 层的「日报补发」。
+RETRY_DELAYS = (20, 60)
+
+
+def _jitter(sec):
+    """±20% 抖动：多通道/多实例同时撞限流时不要同一秒一起重发。"""
+    if sec <= 0:
+        return 0
+    delta = sec * 0.2
+    return max(0.0, sec - delta + random.random() * delta * 2)
+
+
+def _is_rate_limited(channel, code, detail):
+    """这条失败是不是「限流」—— 只有限流才值得重试。"""
+    if code is not None and int(code) in RATE_LIMIT_CODES.get(channel, ()):
+        return True
+    low = str(detail or "").lower()
+    return any(h.lower() in low for h in RATE_LIMIT_HINTS)
 
 
 def dingtalk_signed_url(webhook, secret):
@@ -61,13 +105,13 @@ def _post_json(url, payload, timeout=10):
 
 
 def _check_body(channel, body):
-    """返回 (ok, detail)。三个平台的错误码字段不一样，都认。"""
+    """返回 (ok, detail, code)。三个平台的错误码字段不一样，都认。"""
     try:
         j = json.loads(body)
     except Exception:
-        return True, "已发送（响应非 JSON，未校验业务码）"
+        return True, "已发送（响应非 JSON，未校验业务码）", None
     if not isinstance(j, dict):
-        return True, "已发送"
+        return True, "已发送", None
     for key in ("errcode", "code", "StatusCode", "errno"):
         if key in j:
             try:
@@ -76,12 +120,41 @@ def _check_body(channel, body):
                 continue
             msg = j.get("errmsg") or j.get("msg") or j.get("StatusMessage") or ""
             if val == 0:
-                return True, "ok"
-            return False, "平台返回 %s=%s %s" % (key, val, msg)
-    return True, "已发送（未识别的响应结构）"
+                return True, "ok", 0
+            return False, "平台返回 %s=%s %s" % (key, val, msg), val
+    return True, "已发送（未识别的响应结构）", None
 
 
-def push_one(cfg, channel, text, timeout=10):
+def _result(channel, ok, detail, ms=None, **extra):
+    r = {"channel": channel, "label": C.PUSH_LABEL.get(channel, channel),
+         "ok": ok, "detail": detail}
+    if ms is not None:
+        r["ms"] = ms
+    r.update(extra)
+    return r
+
+
+def _push_webhook_once(send_url, channel, payload, timeout):
+    """发一次 webhook。返回结果 dict，`code` 只用于内部判定，不往上层塞。"""
+    t0 = time.time()
+    try:
+        status, body = _post_json(send_url, payload, timeout=timeout)
+    except Exception as e:
+        return _result(channel, False, "请求失败：%s" % e,
+                       int((time.time() - t0) * 1000)), None
+    ms = int((time.time() - t0) * 1000)
+    if status // 100 != 2:
+        return _result(channel, False, "HTTP %s：%s" % (status, body[:200]), ms), None
+    ok, detail, code = _check_body(channel, body)
+    return _result(channel, ok, detail, ms), code
+
+
+def push_one(cfg, channel, text, timeout=10, retry_delays=None):
+    """推送一条消息。webhook 渠道遇「限流」自动短退避重试（默认最多 3 次尝试）。
+
+    retry_delays=() 可关闭重试；不传则用模块级 RETRY_DELAYS（运行时可替换，
+    自检靠这个把 80 秒退避压成 0 —— 默认参数在定义时就绑定了，改模块常量不生效）。
+    """
     if channel == "email":
         return send_email(cfg, text, timeout=max(timeout, 20))
     url = (cfg.get("%s_webhook" % channel) or "").strip()
@@ -90,25 +163,36 @@ def push_one(cfg, channel, text, timeout=10):
     else:
         send_url = url
     if not send_url:
-        return {"channel": channel, "label": C.PUSH_LABEL.get(channel, channel),
-                "ok": False, "detail": "未配置 webhook"}
+        return _result(channel, False, "未配置 webhook")
     payload = _payload(channel, text)
     if payload is None:
-        return {"channel": channel, "ok": False, "detail": "未知渠道"}
-    t0 = time.time()
-    try:
-        status, body = _post_json(send_url, payload, timeout=timeout)
-    except Exception as e:
-        return {"channel": channel, "label": C.PUSH_LABEL.get(channel, channel),
-                "ok": False, "detail": "请求失败：%s" % e,
-                "ms": int((time.time() - t0) * 1000)}
-    ms = int((time.time() - t0) * 1000)
-    if status // 100 != 2:
-        return {"channel": channel, "label": C.PUSH_LABEL.get(channel, channel),
-                "ok": False, "detail": "HTTP %s：%s" % (status, body[:200]), "ms": ms}
-    ok, detail = _check_body(channel, body)
-    return {"channel": channel, "label": C.PUSH_LABEL.get(channel, channel),
-            "ok": ok, "detail": detail, "ms": ms}
+        return _result(channel, False, "未知渠道")
+
+    delays = tuple(RETRY_DELAYS if retry_delays is None else retry_delays)
+    attempts = 0
+    while True:
+        attempts += 1
+        res, code = _push_webhook_once(send_url, channel, payload, timeout)
+        if res["ok"]:
+            res["attempts"] = attempts
+            if attempts > 1:
+                res["retried"] = True
+                res["detail"] = "%s（限流后重试 %d 次成功）" % (res["detail"], attempts - 1)
+            return res
+        # 只有「限流」才重试；其它错误立即返回（配置问题重试一百次也一样）
+        if not _is_rate_limited(channel, code, res.get("detail")):
+            res["attempts"] = attempts
+            return res
+        idx = attempts - 1
+        if idx >= len(delays):
+            res["attempts"] = attempts
+            res["rate_limited"] = True
+            res["detail"] += "（被限流，已重试 %d 次仍失败）" % len(delays)
+            return res
+        wait = _jitter(delays[idx])
+        logger.warning("%s 推送被限流（%s），%.0f 秒后第 %d 次重试",
+                       C.PUSH_LABEL.get(channel, channel), res["detail"], wait, attempts)
+        time.sleep(wait)
 
 
 # ---------------------------------------------------------------- 电子邮件
@@ -263,15 +347,24 @@ def push_all(cfg, text, channels=None):
         r = push_one(cfg, ch, text)
         out.append(r)
         try:
-            import logging
-            lg = logging.getLogger("erm")
             if r.get("ok"):
-                lg.info("已推送 %s（%sms）", ch, r.get("ms"))
+                logger.info("已推送 %s（%sms）", ch, r.get("ms"))
             else:
-                lg.error("推送 %s 失败：%s", ch, r.get("detail"))
+                logger.error("推送 %s 失败：%s", ch, r.get("detail"))
         except Exception:
             pass
     return out
+
+
+def all_ok(results):
+    """这组推送结果是否全部成功（空结果算失败）。"""
+    return bool(results) and all(r.get("ok") for r in results)
+
+
+def failed_channels(results):
+    """失败的渠道列表；「未启用任何推送渠道」不算可重试失败。"""
+    return [r.get("channel") for r in (results or [])
+            if not r.get("ok") and r.get("channel") not in (None, "-")]
 
 
 def test_text(cfg):

@@ -21,7 +21,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import config as C
-from notify import push_all
+from notify import push_all, all_ok as push_all_ok, failed_channels
 
 logger = logging.getLogger("erm")
 
@@ -527,9 +527,15 @@ def report_due(cfg, state, now=None):
 
     这样进程重启、NAS 睡眠错过 08:00 也能补发当天一次，而不是漏掉一整天；
     last_report_day 落在 state.json，重启不会重复发。
+
+    v1.0.14：上一次推送**失败**时不写 last_report_day，而是登记 report_retry
+    （带 next_try），到点由这里放行补发 —— 见 run_daily 的注释。
     """
     now = now or now_dt(cfg)
     today = now.strftime("%Y-%m-%d")
+    retry = state.get("report_retry") or {}
+    if isinstance(retry, dict) and retry.get("day") == today:
+        return float(now.timestamp()) >= float(retry.get("next_try") or 0)
     if state.get("last_report_day") == today:
         return False
     hh, mm = [int(x) for x in cfg["daily_report_time"].split(":")]
@@ -554,14 +560,23 @@ def run_scan(cfg, state, force_alert=False):
             silence_s == 0) or (now_ts - int(gst.get("last_alert_time", 0)) >= silence_s)
         if due:
             msg = "【EasyNVR 录像监控异常】\n%s\n检测时间：%s" % (ev["error"], fmt_ts(cfg, now_ts))
-            events.append({"scope": key, "kind": "alert", "message": msg})
+            events.append({"scope": key, "kind": "alert", "message": msg,
+                           "prev_alert_time": gst.get("last_alert_time")})
             gst["last_alert_time"] = now_ts
             gst["alerting"] = True
             state["channels"][key] = gst
         state["last_check"] = now_ts
         state["last_result"] = ev
         C.save_state(state)
-        return {"result": ev, "events": events, "pushed": push_events(cfg, events)}
+        pushed = push_events(cfg, events)
+        if rollback_failed_alerts(state, events, pushed):
+            mark_alert_retry(state, events, pushed)
+            C.save_state(state)
+        else:
+            scopes = [e.get("scope") for e in events if e.get("kind") == "alert"]
+            if scopes and clear_alert_retry(state, scopes):
+                C.save_state(state)
+        return {"result": ev, "events": events, "pushed": pushed}
 
     state["channels"].pop("__global__", None)
     silence_s = cfg["alert_silence_minutes"] * 60
@@ -578,11 +593,15 @@ def run_scan(cfg, state, force_alert=False):
                 due = True                      # 刚进入异常：立即告警
             elif silence_s <= 0:
                 due = False                     # 0 = 同一异常只告警一次，恢复后才重新告警
+            elif st.get("next_alert_retry"):
+                # 上次推送失败、还欠一条告警：到退避时间就重发
+                due = now_ts >= int(st.get("next_alert_retry") or 0)
             else:
                 due = (now_ts - int(st.get("last_alert_time", 0))) >= silence_s
             if due:
                 msg = build_alert_message(cfg, ch)
-                events.append({"scope": name, "kind": "alert", "message": msg})
+                events.append({"scope": name, "kind": "alert", "message": msg,
+                               "prev_alert_time": st.get("last_alert_time")})
                 st["last_alert_time"] = now_ts
                 logger.warning("告警 %s: %s", name, _alert_reason(cfg, ch))
             st["alerting"] = True
@@ -601,7 +620,124 @@ def run_scan(cfg, state, force_alert=False):
     state["last_check"] = now_ts
     state["last_result"] = ev
     C.save_state(state)                          # 一轮只落一次盘（原文档是每通道一次）
-    return {"result": ev, "events": events, "pushed": push_events(cfg, events)}
+    pushed = push_events(cfg, events)
+    if events:
+        if rollback_failed_alerts(state, events, pushed):
+            mark_alert_retry(state, events, pushed)   # 按退避节奏安排下一次重试
+            C.save_state(state)
+        else:
+            scopes = [e.get("scope") for e in events if e.get("kind") == "alert"]
+            if scopes and clear_alert_retry(state, scopes):
+                C.save_state(state)
+    return {"result": ev, "events": events, "pushed": pushed}
+
+
+def pending_alert_retries(state):
+    """尚未送达的告警，各自的「最早重试时间」列表（给主循环算唤醒间隔）。"""
+    out = []
+    for st in (state.get("channels") or {}).values():
+        if not isinstance(st, dict):
+            continue
+        t = st.get("next_alert_retry")
+        if t:
+            try:
+                out.append(float(t))
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
+def rollback_failed_alerts(state, events, pushed):
+    """告警一条都没送出去时，把 last_alert_time 回滚到推送前。
+
+    背景（v1.0.14）：原先无论推送成败都推进 last_alert_time，飞书被限流的那次告警
+    就被当成"已告警"，**整个静默期（默认 120 分钟）都不会再发** —— 限流一分钟，
+    丢两小时。现在失败就回滚，下一轮扫描自然会重发。
+    `alerting` 保持 True（异常事实仍然成立），只是让"该不该发"重新判定。
+    """
+    if not events or not pushed or push_all_ok(pushed):
+        return False
+    if not failed_channels(pushed):
+        return False                    # 没启用渠道：没有"推送失败"可言
+    changed = False
+    for e in events:
+        if e.get("kind") != "alert":
+            continue
+        st = state.get("channels", {}).get(e.get("scope"))
+        if not isinstance(st, dict):
+            continue
+        prev = e.get("prev_alert_time")
+        if prev is None:
+            st.pop("last_alert_time", None)
+        else:
+            st["last_alert_time"] = prev
+        st["rolled_back"] = True
+        changed = True
+    if changed:
+        logger.warning("告警推送失败（%s），已回滚告警时间戳，下一轮扫描重发",
+                       "、".join(C.PUSH_LABEL.get(c, str(c)) for c in failed_channels(pushed)))
+    return changed
+
+
+# 告警补发：连续推送失败时逐步拉长间隔（30s → 60s → 120s → 300s，封顶 5 分钟）。
+# 为什么不能一直按「扫描间隔」硬重试：NAS 挂了整晚、飞书整晚抽风时，
+# 5 分钟一次的失败日志会把 monitor.log 刷满（5MB×3 轮转也就几天）。
+ALERT_RETRY_BACKOFF = (30, 60, 120, 300)
+ALERT_RETRY_MAX = 300
+
+
+def _retry_delay(fails):
+    """第 fails 次失败后，多久再试。"""
+    idx = max(0, int(fails) - 1)
+    if idx < len(ALERT_RETRY_BACKOFF):
+        return ALERT_RETRY_BACKOFF[idx]
+    return ALERT_RETRY_MAX
+
+
+def mark_alert_retry(state, events, pushed):
+    """告警推送失败 → 登记 alert_retry（下次最早何时再试）。
+
+    与 rollback_failed_alerts 配套：回滚让「due 判定」重新放行，这里控制**节奏**，
+    等价于给静默窗口加一层"退避" —— 白天正常（扫描 10 分钟一次）时下一轮就重发，
+    整晚失败时也不会把日志刷爆。
+    """
+    failed = failed_channels(pushed or [])
+    if not events or not failed:
+        return False
+    scopes = [e.get("scope") for e in events if e.get("kind") == "alert"]
+    if not scopes:
+        return False
+    now_ts = int(time.time())
+    delay = 0
+    for scope in scopes:
+        st = state.get("channels", {}).get(scope)
+        if not isinstance(st, dict):
+            continue
+        fails = int(st.get("alert_fails") or 0) + 1
+        delay = _retry_delay(fails)
+        st["alert_fails"] = fails
+        st["next_alert_retry"] = now_ts + delay
+    logger.warning("告警未能送达（%s），%d 秒后重试",
+                   "、".join(C.PUSH_LABEL.get(c, str(c)) for c in failed), delay)
+    return True
+
+
+def clear_alert_retry(state, scopes):
+    """推送成功 → 清掉补发状态。
+
+    注意 `or` 的短路：`a or b or c` 在 a 为真时就不会执行 b/c，于是
+    alert_fails / next_alert_retry 会一直留着，下一轮被误判成"还欠一条告警"而重发
+    （自检抓到：ROUND3 成功送达后 ROUND4 仍重复告警）。所以先取值再 pop，别短路。
+    """
+    changed = False
+    for scope in scopes:
+        st = state.get("channels", {}).get(scope)
+        if not isinstance(st, dict):
+            continue
+        for key in ("alert_fails", "next_alert_retry", "rolled_back"):
+            if st.pop(key, None) is not None:
+                changed = True
+    return changed
 
 
 def push_events(cfg, events):
@@ -612,15 +748,72 @@ def push_events(cfg, events):
     return push_all(cfg, text)
 
 
-def run_daily(cfg, state, now=None):
+DAILY_RETRY_MAX = 3        # 失败后最多补发 3 次（首次之外）
+DAILY_RETRY_DELAY = 300    # 秒；补发间隔 5 分钟，够跨过整点推送高峰
+
+
+def _failure_summary(results):
+    return "；".join("%s：%s" % (r.get("label") or r.get("channel"), r.get("detail"))
+                    for r in (results or []) if not r.get("ok")) or "未知原因"
+
+
+def run_daily(cfg, state, now=None, manual=False):
+    """发日报。
+
+    v1.0.14 的两个修正（2026-11-01/02 09:00 连续被飞书限流暴露）：
+      1. **不再谎报「已发送」**：只有全部启用渠道都成功才写 last_report_day；
+      2. **失败自动补发**：登记 report_retry（5 分钟后、最多 3 次），由 report_due
+         放行；仍然失败才写 last_report_day 并记 ERROR，避免永久性配置错误
+         （webhook 写错）每 15 秒重刷一遍日志。
+    手动「立即发送」（manual=True）不登记补发：用户就在页面盯着，失败他自己会再点。
+    """
     now = now or now_dt(cfg)
+    today = now.strftime("%Y-%m-%d")
     text = build_daily_report(cfg, now)
     results = push_all(cfg, text)
-    state["last_report_day"] = now.strftime("%Y-%m-%d")
-    state["last_report_at"] = int(now.timestamp())
-    C.save_state(state)
-    logger.info("日报已发送：%s", state["last_report_day"])
-    return {"message": text, "pushed": results}
+
+    def _done(ok):
+        C.save_state(state)
+        return {"message": text, "pushed": results, "ok": ok, "day": today}
+
+    if push_all_ok(results):
+        state["last_report_day"] = today
+        state["last_report_at"] = int(now.timestamp())
+        state.pop("report_retry", None)
+        logger.info("日报已发送：%s", today)
+        return _done(True)
+
+    failed = failed_channels(results)
+    prev = state.get("report_retry") or {}
+    retries_done = int(prev.get("retries") or 0) if (
+        isinstance(prev, dict) and prev.get("day") == today) else 0
+
+    if manual or not failed:
+        # 手动触发，或压根没启用渠道：不补发。
+        # 「今天已发」只在**没启用渠道**时才落 —— 手动发送失败不能把当天的自动日报吞掉。
+        if not failed:
+            state["last_report_day"] = today
+        state.pop("report_retry", None)
+        logger.error("日报推送失败（%s，%s），本次不补发", today, _failure_summary(results))
+        return _done(False)
+
+    if retries_done >= DAILY_RETRY_MAX:
+        state["last_report_day"] = today
+        state.pop("report_retry", None)
+        logger.error("日报推送失败，已补发 %d 次仍失败，今天不再重试（%s）：%s",
+                     DAILY_RETRY_MAX, today, _failure_summary(results))
+        return _done(False)
+
+    state["report_retry"] = {
+        "day": today,
+        "retries": retries_done + 1,
+        "next_try": int(now.timestamp()) + DAILY_RETRY_DELAY,
+        "failed": failed,
+    }
+    logger.warning("日报推送失败（失败渠道：%s），%d 秒后第 %d/%d 次补发",
+                   "、".join(C.PUSH_LABEL.get(c, str(c)) for c in failed),
+                   DAILY_RETRY_DELAY, retries_done + 1, DAILY_RETRY_MAX)
+    return _done(False)
 
 
 # ---------------------------------------------------------------- 主循环（供 server.py 起线程）
@@ -631,6 +824,7 @@ def monitor_loop(get_cfg, get_state, stop_event, on_tick=None, lock=None):
     get_cfg() 每轮重新取配置 —— 前端保存配置后**立即生效**，不用重启应用。
     lock：与「前端点『立即检测』」共用的互斥锁。state 必须是同一个对象，
     否则两条扫描路径各持一份 state，会重复发恢复通知（实测踩过）。
+    v1.0.15：有告警补发待办时，唤醒粒度收紧到 ≤5 秒（退避到点就发，不等一个扫描周期）。
     """
     setup_logging()
     logger.info("ERM 监控启动")
@@ -638,6 +832,7 @@ def monitor_loop(get_cfg, get_state, stop_event, on_tick=None, lock=None):
     while not stop_event.is_set():
         cfg = get_cfg()
         state = get_state()
+        wait = 15
         try:
             if time.time() >= next_tick:
                 with (lock or contextlib.nullcontext()):
@@ -654,6 +849,13 @@ def monitor_loop(get_cfg, get_state, stop_event, on_tick=None, lock=None):
                     run_daily(cfg, state)
         except Exception as e:
             logger.exception("日报异常: %s", e)
+        # 告警补发到点后最多再等 5 秒就发，而不是干等一个扫描周期
+        try:
+            waits = [t - time.time() for t in pending_alert_retries(state)]
+            if waits:
+                wait = min(wait, max(1.0, min(waits)), 5.0)
+        except Exception:
+            pass
         # 每 15 秒醒一次：日报到点精度 15 秒内，且 stop 能及时响应
-        stop_event.wait(15)
+        stop_event.wait(max(1.0, wait))
     logger.info("ERM 监控已停止")

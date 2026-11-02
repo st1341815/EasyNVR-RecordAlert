@@ -30,7 +30,7 @@ from urllib.parse import parse_qs, urlparse
 
 APP_NAME = "erm"
 GATEWAY_PREFIX = "/app/" + APP_NAME
-VERSION = "1.0.13"
+VERSION = "1.0.14"
 
 SELF = os.path.abspath(__file__)
 APP_DEST = os.path.dirname(SELF)           # app/ 的内容直接铺到 target 根
@@ -79,6 +79,14 @@ def validate(cfg):
     chans = cfg.get("enabled_push_channels") or []
     if not chans:
         warnings.append("没有启用任何推送渠道，告警只会写日志")
+    # 整点推送高峰：飞书自定义机器人共用内置应用（appID 1500），整点常被平台限流
+    try:
+        hh, mm = [int(x) for x in str(cfg.get("daily_report_time") or "08:00").split(":")]
+        if mm == 0 and "feishu" in chans:
+            warnings.append("日报时间设为整点 %02d:00：飞书在整点推送高峰常返回 11232/11233 限流，"
+                            "建议错峰到 %02d:%02d（失败也会自动补发，但错峰更省事）" % (hh, hh, 5))
+    except Exception:
+        pass
     for ch in chans:
         if ch == "email":
             w, e = _validate_email(cfg)
@@ -228,8 +236,9 @@ def handle_action(body, query):
 
     if act == "daily_now":
         with SCAN_LOCK:
-            res = M.run_daily(get_cfg(), STATE)
-        return {"ok": True, "message": res["message"], "pushed": res["pushed"]}
+            res = M.run_daily(get_cfg(), STATE, manual=True)
+        return {"ok": True, "message": res["message"], "pushed": res["pushed"],
+                "sent": res.get("ok", False)}
 
     if act == "reset_state":
         with SCAN_LOCK:

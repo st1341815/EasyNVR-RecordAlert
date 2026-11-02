@@ -15,6 +15,7 @@
 跑法：  PYTHONPATH= python3 selftest.py
 """
 
+import contextlib
 import json
 import os
 import shutil
@@ -85,8 +86,9 @@ def mk_record_tree(root):
 # ------------------------------------------------------------------ mock 推送服务
 
 class MockHandler(BaseHTTPRequestHandler):
-    mode = "ok"          # ok | dingtalk_err | http500 | feishu_ok
+    mode = "ok"          # ok | dingtalk_err | http500 | feishu_ok | feishu_rl | feishu_rl_once
     bodies = []
+    hits = 0
 
     def log_message(self, *a):
         pass
@@ -94,6 +96,7 @@ class MockHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         n = int(self.headers.get("Content-Length") or 0)
         MockHandler.bodies.append(json.loads(self.rfile.read(n).decode("utf-8")))
+        MockHandler.hits += 1
         if MockHandler.mode == "http500":
             self.send_response(500)
             self.end_headers()
@@ -101,6 +104,15 @@ class MockHandler(BaseHTTPRequestHandler):
             return
         if MockHandler.mode == "dingtalk_err":
             body = json.dumps({"errcode": 310000, "errmsg": "keywords not in content"}).encode()
+        elif MockHandler.mode == "feishu_rl":
+            body = json.dumps({"code": 11232, "msg": "frequency limited "
+                               "psm[lark.oapi.app_platform_runtime]appID[1500]"}).encode()
+        elif MockHandler.mode == "feishu_rl_once":
+            # 第一次限流、之后成功：验证「限流 → 退避 → 重试成功」整条链路
+            if MockHandler.hits == 1:
+                body = json.dumps({"code": 11233, "msg": "chat rate limit"}).encode()
+            else:
+                body = json.dumps({"code": 0, "msg": "success"}).encode()
         elif MockHandler.mode == "feishu_ok":
             body = json.dumps({"code": 0, "msg": "success"}).encode()
         else:
@@ -110,6 +122,22 @@ class MockHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+
+@contextlib.contextmanager
+def paused_retry():
+    """自检期间把「推送退避等待」压成 0 秒。
+
+    notify 的退避是真睡（生产上 20s + 60s，实测有效），但自检不能真等 80 秒：
+    这里替换的是模块级 RETRY_DELAYS 常量（push_one 的默认参数即取自它）。
+    重试**逻辑**照常走（次数、频控判定、结果标记都不变），只是不睡。
+    """
+    old = N.RETRY_DELAYS
+    N.RETRY_DELAYS = ()
+    try:
+        yield
+    finally:
+        N.RETRY_DELAYS = old
 
 
 def start_mock():
@@ -500,6 +528,190 @@ def test_normalize_keeps_secret():
     eq(C.load_config()["dingtalk_webhook"], "https://a/b", "未提供的键保留默认/原值")
 
 
+def test_rate_limit_retry(webhook):
+    """v1.0.14：飞书 11232/11233 限流要退避重试，且只对限流重试。
+
+    退化前（v1.0.13）行为：限流一次就彻底失败，而 run_daily 还写「已发送」，
+    导致 2026-11-01 / 11-02 两天的 09:00 日报静默丢失。
+    """
+    cfg = C.normalize({"enabled_push_channels": "feishu", "feishu_webhook": webhook})
+
+    # ① 限流 → 退避重试 → 成功（重试延迟给 0.01 秒，让自检跑得快）
+    MockHandler.mode, MockHandler.bodies, MockHandler.hits = "feishu_rl_once", [], 0
+    r = N.push_one(cfg, "feishu", "hi", retry_delays=(0.01, 0.01))
+    ok(r["ok"], "限流后重试成功（11233 → code=0）", r.get("detail"))             
+    eq(MockHandler.hits, 2, "限流重试：共发了 2 次")
+    eq(r.get("attempts"), 2, "结果里标注尝试次数")
+    ok(r.get("retried") is True, "结果里标注发生过重试")
+    ok("重试" in r["detail"], "成功详情说明重试过", r["detail"])
+
+    # ② 持续限流 → 用完所有退避次数后如实失败
+    MockHandler.mode, MockHandler.hits = "feishu_rl", 0
+    r = N.push_one(cfg, "feishu", "hi", retry_delays=(0.01, 0.01))
+    eq(r["ok"], False, "持续限流 → 最终失败（不假装成功）")
+    eq(MockHandler.hits, 3, "默认 1 次 + 2 次重试 = 3 次尝试")
+    ok(r.get("rate_limited") is True, "标记为限流失败，便于上层决定补发")
+    ok("11232" in r["detail"], "失败详情带回平台错误码", r["detail"])
+
+    # ③ 非限流错误（钉钉关键词 310000）绝不重试——否则配置问题会被伪装成偶发
+    MockHandler.mode, MockHandler.hits = "dingtalk_err", 0
+    cfg_dt = C.normalize({"enabled_push_channels": "dingtalk", "dingtalk_webhook": webhook})
+    r = N.push_one(cfg_dt, "dingtalk", "hi", retry_delays=(0.01, 0.01))
+    eq(r["ok"], False, "钉钉 310000 判失败")
+    eq(MockHandler.hits, 1, "配置类错误只发 1 次，不浪费重试")
+
+    # ④ 限流判定表：三个平台都认，且不误伤配置错误
+    ok(N._is_rate_limited("feishu", 11232, ""), "飞书 11232 算限流")
+    ok(N._is_rate_limited("feishu", 11233, ""), "飞书 11233 算限流")
+    ok(N._is_rate_limited("dingtalk", 130101, ""), "钉钉 130101 算限流")
+    ok(N._is_rate_limited("wechat", 45009, ""), "企微 45009 算限流")
+    ok(not N._is_rate_limited("feishu", 19001, "param error"), "飞书参数错 19001 不算限流")
+    ok(not N._is_rate_limited("dingtalk", 310000, "keywords not in content"),
+       "钉钉关键词错 310000 不算限流")
+    ok(N._is_rate_limited("feishu", None, "xxx frequency limited yyy"),
+       "错误码没命中时按文本兜底识别限流")
+
+    # ⑤ 抖动：多通道同时撞限流时不要同一秒一起重发
+    vals = [N._jitter(60) for _ in range(20)]
+    ok(all(48 <= v <= 72 for v in vals), "抖动在 ±20% 内", vals[:3])
+    ok(len(set(round(v, 3) for v in vals)) > 1, "抖动确实有随机性")
+    eq(N._jitter(0), 0, "0 秒不抖动")
+
+    # ⑥ 多通道聚合：all_ok / failed_channels 是补发决策的依据
+    MockHandler.mode = "feishu_ok"
+    ok(N.all_ok([{"channel": "feishu", "ok": True}]), "all_ok 全成功")
+    ok(not N.all_ok([{"channel": "feishu", "ok": True}, {"channel": "email", "ok": False}]),
+       "all_ok 有失败即 False")
+    eq(N.failed_channels([{"channel": "-", "ok": False}]), [],
+       "「未启用任何渠道」不算可重试失败")
+    eq(N.failed_channels([{"channel": "feishu", "ok": False}]), ["feishu"], "failed_channels 取失败渠道")
+
+
+def test_daily_retry(webhook):
+    """v1.0.14：日报推送失败 → 不写 last_report_day、只落 report_retry，到点补发。"""
+    tz = M.get_tz(C.normalize({}))
+    day = datetime(2026, 11, 2, 9, 0, 5, tzinfo=tz)
+    today = day.strftime("%Y-%m-%d")
+    cfg = C.normalize({"daily_report_time": "09:00", "enabled_push_channels": "feishu",
+                       "feishu_webhook": webhook, "record_root": TMP_VAR})
+
+    # ① 推送失败：不得谎报「已发送」
+    MockHandler.mode, MockHandler.hits = "feishu_rl", 0
+    state = {}
+    with paused_retry():
+        res = M.run_daily(cfg, state, now=day)
+    eq(res["ok"], False, "日报失败时 ok=False")
+    ok("last_report_day" not in state, "推送失败**不写** last_report_day（v1.0.13 会写，导致丢报）")
+    retry = state.get("report_retry") or {}
+    eq(retry.get("day"), today, "登记了当天的补发任务")
+    eq(retry.get("retries"), 1, "补发计数 = 1")
+    eq(retry.get("failed"), ["feishu"], "记下失败渠道，便于页面/日志展示")
+    later = day + timedelta(seconds=M.DAILY_RETRY_DELAY - 1)
+    eq(M.report_due(cfg, state, now=later), False, "补发未到点不发（避免 15 秒一次硬撞限流）")
+    eq(M.report_due(cfg, state, now=day + timedelta(seconds=M.DAILY_RETRY_DELAY + 1)), True,
+       "补发到点 → 放行")
+
+    # ② 补发成功：清掉补发状态、写 last_report_day
+    MockHandler.mode = "feishu_ok"
+    with paused_retry():
+        res = M.run_daily(cfg, state, now=day + timedelta(seconds=M.DAILY_RETRY_DELAY + 2))
+    eq(res["ok"], True, "补发成功")
+    eq(state.get("last_report_day"), today, "补发成功后写 last_report_day")
+    ok("report_retry" not in state, "补发成功清掉补发状态")
+    eq(M.report_due(cfg, state, now=day + timedelta(hours=5)), False, "当天不再重复发")
+
+    # ③ 补发次数上限：连续失败 DAILY_RETRY_MAX 次后放弃，避免永久性配置错误刷日志
+    MockHandler.mode, MockHandler.hits = "feishu_rl", 0
+    state = {}
+    t = day
+    # 只剩「用完所有补发次数」这一种失败结局，HTTP 层只打桩 1 次尝试，
+    # 否则每次 run_daily 都要跑满 3 次尝试 × (N+1) 轮，自检白白多花一分多钟。
+    saved_delays = N.RETRY_DELAYS
+    N.RETRY_DELAYS = ()
+    try:
+        for i in range(M.DAILY_RETRY_MAX + 1):
+            M.run_daily(cfg, state, now=t)
+            t = t + timedelta(seconds=M.DAILY_RETRY_DELAY + 1)
+    finally:
+        N.RETRY_DELAYS = saved_delays
+    eq(state.get("last_report_day"), today,
+       "补发 %d 次仍失败 → 写 last_report_day 停止重试" % M.DAILY_RETRY_MAX)
+    ok("report_retry" not in state, "放弃后清掉补发状态")
+    eq(M.report_due(cfg, state, now=t + timedelta(hours=1)), False, "放弃后当天不再发")
+
+    # ④ 手动发送失败：不能把当天自动日报吞掉
+    MockHandler.mode, MockHandler.hits = "feishu_rl", 0
+    state = {}
+    with paused_retry():
+        res = M.run_daily(cfg, state, now=day, manual=True)
+    eq(res["ok"], False, "手动发送失败如实返回 ok=False")
+    ok("last_report_day" not in state, "手动失败不写 last_report_day（到点自动日报照发）")
+    ok("report_retry" not in state, "手动失败不登记补发（用户就在页面盯着）")
+
+    # ⑤ 没启用任何渠道：算「已处理」，避免每 15 秒重试一整晚（关掉重试，省时间）
+    st2 = {}
+    N.RETRY_DELAYS = ()
+    try:
+        res = M.run_daily(C.normalize({"daily_report_time": "09:00", "record_root": TMP_VAR}),
+                          st2, now=day)
+    finally:
+        N.RETRY_DELAYS = saved_delays
+    eq(res["ok"], False, "未启用渠道 → 结果如实为失败")
+    eq(st2.get("last_report_day"), today, "未启用渠道时写 last_report_day（无可重试的渠道）")
+
+
+def test_alert_retry(webhook):
+    """v1.0.15：告警推送失败 → 回滚 last_alert_time + 退避补发，别让静默期吞掉告警。"""
+    root, _files = mk_record_tree(os.path.join(TMP_VAR, "record_retry"))
+    cfg = C.normalize({"record_root": root, "video_exts": ".mp4",
+                       "alert_threshold_minutes": "60", "alert_silence_minutes": "120",
+                       "enabled_push_channels": "feishu", "feishu_webhook": webhook})
+
+    # ① 首次告警但推送失败（限流）
+    MockHandler.mode, MockHandler.hits = "feishu_rl", 0
+    state = {"channels": {}}
+    with paused_retry():
+        res = M.run_scan(cfg, state)
+    ok(any(e["kind"] == "alert" for e in res["events"]), "有通道异常 → 产生告警事件")
+    alerts = [e["scope"] for e in res["events"] if e["kind"] == "alert"]
+    st = state["channels"][alerts[0]]
+    ok("last_alert_time" not in st or st["last_alert_time"] < time.time() - 10,
+       "推送失败 → last_alert_time 已回滚（否则静默 120 分钟都不会再发）")
+    eq(st.get("alert_fails"), 1, "失败计数 = 1")
+    ok(st.get("next_alert_retry", 0) > time.time(), "登记了下一次重试时间")
+    gap = st.get("next_alert_retry", 0) - int(time.time())
+    ok(abs(gap - M.ALERT_RETRY_BACKOFF[0]) <= 2,
+       "首次失败约 %d 秒后重试（实测差 %d 秒）" % (M.ALERT_RETRY_BACKOFF[0], gap))
+    ok(M.pending_alert_retries(state), "pending_alert_retries 能报出待补发时间（主循环据此提前唤醒）")
+
+    # ② 退避没到点：不重发（免得每轮都撞平台限流）
+    st["next_alert_retry"] = int(time.time()) + 300
+    MockHandler.hits = 0
+    with paused_retry():
+        res2 = M.run_scan(cfg, state)
+    eq([e for e in res2["events"] if e["kind"] == "alert"], [], "退避未到点不重发")
+    eq(MockHandler.hits, 0, "退避未到点时一次请求都没发")
+
+    # ③ 到点重发且成功 → 补发状态清空
+    st["next_alert_retry"] = int(time.time()) - 1
+    MockHandler.mode, MockHandler.hits = "feishu_ok", 0
+    with paused_retry():
+        res3 = M.run_scan(cfg, state)
+    ok(any(e["kind"] == "alert" for e in res3["events"]), "退避到点 → 重发告警")
+    eq(MockHandler.hits, 1, "重发一次请求")
+    st = state["channels"][alerts[0]]
+    ok(not st.get("next_alert_retry"), "成功后退订补发")
+    ok(not st.get("alert_fails"), "成功后清掉失败计数")
+    ok(st.get("last_alert_time", 0) > 0, "成功后 last_alert_time 正常推进（进入静默期）")
+
+    # ④ 静默期内不再重复发（原有行为不能破坏）
+    MockHandler.hits = 0
+    with paused_retry():
+        res4 = M.run_scan(cfg, state)
+    eq([e for e in res4["events"] if e["kind"] == "alert"], [], "静默期内不重复告警")
+    eq(MockHandler.hits, 0, "静默期内不发请求")
+
+
 def main():
     print("== erm 自检开始（数据目录 %s）" % TMP_VAR)
     srv, webhook = start_mock()
@@ -510,6 +722,9 @@ def main():
                    test_normalize_keeps_secret):
             fn()
         test_push(webhook)
+        test_rate_limit_retry(webhook)
+        test_daily_retry(webhook)
+        test_alert_retry(webhook)
     finally:
         srv.shutdown()
         shutil.rmtree(TMP_VAR, ignore_errors=True)

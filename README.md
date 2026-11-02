@@ -19,6 +19,21 @@
 > `EasyNVR-RecordAlert-<版本>.fpk` → 飞牛「应用中心 → 手动安装」（**向导不问录像目录与通道**）→ 打开应用填录像目录 → 到「设置 → 授权目录」授权该目录 → 重启应用。
 > 版本变更见 [CHANGELOG.md](CHANGELOG.md)。
 
+### 最新版本 v1.0.14
+
+> **推送不再被平台限流静默吞掉。** 起因是线上真实故障：飞书在整点推送高峰返回
+> `code=11232 frequency limited` / `11233 chat rate limit`，而旧实现既不重试、
+> 又无论成败都写「日报已发送」——日报丢了一整天，日志还看不出问题。
+>
+> - **限流自动重试**：飞书 11232/11233、钉钉 130101、企微 45009，立即 + 20 秒 + 60 秒共 3 次尝试（带抖动）；
+>   **只对限流重试** —— webhook 写错、关键词不匹配、签名错立即返回，不会把配置问题伪装成"偶发失败"。
+> - **日报失败不再谎报**：全部渠道成功才记为已发送，失败 5 分钟后自动补发、最多 3 次。
+> - **告警失败不会丢**：回滚告警时间戳并按 30→60→120→300 秒退避补发，不再让一次限流吞掉整个静默期。
+> - **错峰提醒**：日报设在整点且启用飞书时，配置页提示改到 `09:05`。
+>
+> 自检从 100 项扩到 **155 项**（新增限流重试 / 日报补发 / 告警退避三组）。
+> 完整列表见 [CHANGELOG.md](CHANGELOG.md#v1014--限流不再吞掉日报与告警)。
+
 
 ---
 
@@ -28,7 +43,7 @@
 erm-fpk/
 ├── build.sh               一键构建（权限校准 + JSON/manifest 校验 + py_compile + fnpack）
 ├── gen_icons.py           生成 64/256 图标（纯标准库，无 Pillow）
-├── selftest.py            79 项断言的自检（不联网，除本地 mock）
+├── selftest.py            155 项断言的自检（不联网，除本地 mock）
 ├── mock_webhook.py        本地 mock 钉钉/企微/飞书（验收推送链路用）
 ├── preview_proxy.py       不登录 fnOS 也能看页面（只读转发，仅供调试）
 ├── docs/                  截图与实测报告
@@ -65,7 +80,7 @@ erm-fpk/
 
 ```bash
 bash build.sh                 # 产出 dist/erm.fpk
-PYTHONPATH= python3 selftest.py   # 79 项断言（先跑这个再打包）
+PYTHONPATH= python3 selftest.py   # 155 项断言（先跑这个再打包）
 bash gen_icons.py             # 只有换图标时才需要
 ```
 
@@ -218,7 +233,7 @@ PYTHONPATH= python3 check_fnpack.py     # 期望 FNPCK_OK（31 项）
 
 ## 8. 自检覆盖
 
-`selftest.py` 96 项断言，重点回归原文档的每个坑：
+`selftest.py` 155 项断言，重点回归原文档的每个坑：
 
 | 断言 | 对应问题 |
 | --- | --- |
@@ -247,7 +262,7 @@ PYTHONPATH= python3 check_fnpack.py     # 期望 FNPCK_OK（31 项）
 「保存配置 → 测试推送 → 自检」，确认存储与调用链路都通。
 
 ```bash
-PYTHONPATH= python3 selftest.py        # 96 项 SELFTEST_ERM_OK
+PYTHONPATH= python3 selftest.py        # 155 项 SELFTEST_ERM_OK
 PYTHONPATH= python3 selftest_email.py  # 59 项
 PYTHONPATH= python3 e2e_email.py       # 13 项 E2E_EMAIL_OK
 ```

@@ -55,6 +55,12 @@
   时段判定（工作日/周末/跨夜/端点/起止相同）、推送计划文案、
   非推送日不发日报、`next_report_dt` 跳过周末、`run_scan` 时段外闸门（不推进状态）。
 
+### 六、升级踩坑（与代码无关，但必须有）
+
+- `trim-cli app uninstall` 会**连「授权目录」一起清掉**：`/vol1/@appdata/erm` 里的
+  config.json / state.json / logs 都保留，但 `app config auth-paths erm` 变成空列表，
+  升级后不补 `set-authorization-path` 就一个录像都读不到。README 4.1 已补第 3.5 步。
+
 ## v1.0.15 · 日报开关 + 时间自定义
 
 ### 一、日报开关（`daily_report_enabled`）

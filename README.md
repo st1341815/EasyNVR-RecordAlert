@@ -191,6 +191,12 @@ trim-cli app uninstall erm --yes
 sudo appcenter-cli install-fpk ./dist/erm.fpk -e ./install-upgrade.env -v 1
 sudo appcenter-cli start erm
 
+# 3.5) ⚠️ 重新授权录像目录 —— 卸载会把「授权目录」一起清掉（2026-11-04 v1.0.16 实测）
+#      config.json 保留、但 auth-paths 变空，不补这一步应用读不到任何录像文件
+trim-cli app config set-authorization-path erm /vol3/1000/NVR --perm 6 --yes
+trim-cli app config auth-paths erm        # 必须能看到那条路径
+trim-cli app restart erm --yes
+
 # 4) 核对（版本 + 配置是否还在）
 sudo grep -a '"version"' /vol1/@appdata/erm/logs/monitor.log | tail -1   # 网关就绪 … version=1.0.15
 sudo cat /vol1/@appdata/erm/config.json | head -3

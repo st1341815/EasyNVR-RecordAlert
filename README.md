@@ -151,6 +151,37 @@ sudo appcenter-cli stop erm && sudo appcenter-cli start erm
 
 装完在「应用中心 → EasyNVR 录像监控 → 打开」就是状态页。
 
+### 4.1 已安装状态下怎么升级（踩过的坑）
+
+fnOS 没有 fpk 的"原地升级"入口，两条路都会失败：
+
+- `trim-cli app install-fpk …` → `requires custom wizard parameters`，带上 `--custom-parameters '[]'` 后又报
+  `POST /app-center/v1/install/task failed: {"code":10236}` —— **10236 = 应用已安装**；
+- `sudo appcenter-cli install-fpk …` → 只打印 `Application [erm] is installed.`，版本号不变（no-op）。
+
+正确流程（2026-11-04 v1.0.13 → v1.0.15 实测通过）：
+
+```bash
+# 1) 备份线上配置（/vol1/@appdata/erm 卸载时不会被删，但配置是唯一真源，备份不吃亏）
+sudo -u postgres pg_dump -t app_authorization_path appcenter > /dev/null  # 可选，查授权
+sudo cp /vol1/@appdata/erm/config.json /vol1/@appdata/erm/config.json.bak-$(date +%Y%m%d)
+
+# 2) 卸载（uninstall_callback 只删 erm.sock；@appdata 里的 config/state/logs 全部保留）
+trim-cli app uninstall erm --yes
+
+# 3) 重装：install-upgrade.env 里所有 wizard_* 留空 → apply_wizard 保留原 config.json
+sudo appcenter-cli install-fpk ./dist/erm.fpk -e ./install-upgrade.env -v 1
+sudo appcenter-cli start erm
+
+# 4) 核对（版本 + 配置是否还在）
+sudo grep -a '"version"' /vol1/@appdata/erm/logs/monitor.log | tail -1   # 网关就绪 … version=1.0.15
+sudo cat /vol1/@appdata/erm/config.json | head -3
+```
+
+> **向导字段全空 = 不修改**，靠的是 `apply_wizard.py` 第一条规则：`env` 为空或缺失就跳过。
+> 所以 `install-upgrade.env` 只放空的 `wizard_*` 键，绝不要把 `install.env.example` 里的
+> `wizard_push_dingtalk=启用` 抄进来 —— 那会把线上渠道改成"仅钉钉 + 空 webhook"。
+
 ## 5. 验证
 
 ```bash

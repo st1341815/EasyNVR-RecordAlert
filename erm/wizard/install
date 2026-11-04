@@ -130,6 +130,18 @@
       },
       {
         "type": "text",
+        "field": "wizard_daily_report_enabled",
+        "label": "每日日报推送（1=启用，0=关闭）",
+        "initValue": "1",
+        "rules": [
+          {
+            "pattern": "^[01]?$",
+            "message": "只能填 1 或 0"
+          }
+        ]
+      },
+      {
+        "type": "text",
         "field": "wizard_daily_report_time",
         "label": "每日统计推送时间（HH:MM）",
         "initValue": "08:00",

@@ -30,7 +30,7 @@ from urllib.parse import parse_qs, urlparse
 
 APP_NAME = "erm"
 GATEWAY_PREFIX = "/app/" + APP_NAME
-VERSION = "1.0.14"
+VERSION = "1.0.15"
 
 SELF = os.path.abspath(__file__)
 APP_DEST = os.path.dirname(SELF)           # app/ 的内容直接铺到 target 根
@@ -80,11 +80,13 @@ def validate(cfg):
     if not chans:
         warnings.append("没有启用任何推送渠道，告警只会写日志")
     # 整点推送高峰：飞书自定义机器人共用内置应用（appID 1500），整点常被平台限流
+    # 日报关掉时这条提醒没有意义（用户本来就不发）
     try:
-        hh, mm = [int(x) for x in str(cfg.get("daily_report_time") or "08:00").split(":")]
-        if mm == 0 and "feishu" in chans:
-            warnings.append("日报时间设为整点 %02d:00：飞书在整点推送高峰常返回 11232/11233 限流，"
-                            "建议错峰到 %02d:%02d（失败也会自动补发，但错峰更省事）" % (hh, hh, 5))
+        if cfg.get("daily_report_enabled", True):
+            hh, mm = [int(x) for x in str(cfg.get("daily_report_time") or "08:00").split(":")]
+            if mm == 0 and "feishu" in chans:
+                warnings.append("日报时间设为整点 %02d:00：飞书在整点推送高峰常返回 11232/11233 限流，"
+                                "建议错峰到 %02d:%02d（失败也会自动补发，但错峰更省事）" % (hh, hh, 5))
     except Exception:
         pass
     for ch in chans:
@@ -152,6 +154,14 @@ def next_scan_eta():
     return max(0, int(last + iv - time.time()))
 
 
+def next_daily_str(cfg):
+    """指标区「下次日报」。日报开关关掉时明确显示「已关闭」，不要留个假时间。"""
+    if not cfg.get("daily_report_enabled", True):
+        return "已关闭"
+    nxt = M.next_report_dt(cfg)
+    return nxt.strftime("%Y-%m-%d %H:%M") if nxt else "已关闭"
+
+
 def status_payload():
     cfg = get_cfg()
     st = snapshot()
@@ -177,7 +187,7 @@ def status_payload():
         "last_check": st.get("last_check") or 0,
         "last_check_str": M.fmt_ts(cfg, st.get("last_check") or 0),
         "next_scan_sec": next_scan_eta(),
-        "next_daily_str": M.next_report_dt(cfg).strftime("%Y-%m-%d %H:%M"),
+        "next_daily_str": next_daily_str(cfg),
         "last_report_day": st.get("last_report_day") or "",
         "warnings": warnings,
         "errors": errors,
@@ -217,7 +227,8 @@ def handle_action(body, query):
         C.save_config(new_cfg)
         log.info("配置已更新：%s", json.dumps({k: new_cfg[k] for k in
                  ("record_root", "channel_layout", "alert_threshold_minutes",
-                  "daily_report_time", "enabled_push_channels")}, ensure_ascii=False))
+                  "daily_report_enabled", "daily_report_time", "enabled_push_channels")},
+                 ensure_ascii=False))
         out = status_payload()
         out["warnings"] = warnings
         out["saved"] = True

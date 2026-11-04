@@ -35,6 +35,7 @@ DEFAULT_CONFIG = {
     "alert_silence_minutes": 120,      # 分钟，>=0（0 = 同一异常只告警一次，恢复后才重新告警）
     "notify_recovery": True,           # 恢复时补一条「已恢复」
     # 日报
+    "daily_report_enabled": True,      # 关掉后不再自动发日报（「补发昨日日报」按钮仍可用）
     "daily_report_time": "08:00",      # HH:MM（本地时区），到点即发、当天只发一次
     # 推送
     "enabled_push_channels": [],       # 装了没配 webhook 就不推送，只写日志（避免每轮报失败）
@@ -219,6 +220,8 @@ def normalize(raw):
     cfg["alert_threshold_minutes"] = as_int(cfg.get("alert_threshold_minutes"), 60, 1)
     cfg["alert_silence_minutes"] = as_int(cfg.get("alert_silence_minutes"), 120, 0)
     cfg["notify_recovery"] = as_bool(cfg.get("notify_recovery"), True)
+    # 旧配置里没有这个键 → 默认开（升级后行为不变，不会突然停掉日报）
+    cfg["daily_report_enabled"] = as_bool(cfg.get("daily_report_enabled"), True)
     cfg["daily_report_time"] = norm_hhmm(cfg.get("daily_report_time"), "08:00")
 
     channels = [c for c in as_list(cfg.get("enabled_push_channels")) if c in PUSH_CHANNELS]

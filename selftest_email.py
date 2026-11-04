@@ -451,6 +451,20 @@ def test_validate():
     ok(any("授权码为空" in x for x in w4), "缺授权码 → warning（不阻止保存）", w4)
     eq([x for x in e4 if "授权码" in x], [], "缺授权码不阻止保存")
 
+    # v1.0.15：日报开关 + 自定义时间
+    cfg_off = C.normalize({
+        "enabled_push_channels": ["email"], "daily_report_enabled": "0",
+        "daily_report_time": "08:00",
+        "email_smtp_host": "smtp.qq.com", "email_smtp_user": "you@qq.com",
+        "email_to": ["a@b.com"],
+    })
+    w5, _e5 = S.validate(cfg_off)
+    ok(not any("整点" in x for x in w5), "日报关闭 → 不再提示整点限流", w5)
+    eq(S.next_daily_str(cfg_off), "已关闭", "日报关闭 → 指标区显示「已关闭」")
+    cfg_on = C.normalize({"daily_report_enabled": True, "daily_report_time": "21:30"})
+    ok(S.next_daily_str(cfg_on).endswith("21:30"), "自定义时间 → 指标区显示 21:30",
+       S.next_daily_str(cfg_on))
+
 
 def main():
     print("== 邮件渠道自检开始（数据目录 %s）" % TMP_VAR)

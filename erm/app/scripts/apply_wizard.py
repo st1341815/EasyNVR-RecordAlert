@@ -29,6 +29,7 @@ MAP = [
     ("wizard_scan_interval", "scan_interval", "int"),
     ("wizard_alert_threshold_minutes", "alert_threshold_minutes", "int"),
     ("wizard_alert_silence_minutes", "alert_silence_minutes", "int"),
+    ("wizard_daily_report_enabled", "daily_report_enabled", "bool"),
     ("wizard_daily_report_time", "daily_report_time", "str"),
     ("wizard_timezone", "timezone", "str"),
     ("wizard_dingtalk_webhook", "dingtalk_webhook", "str"),
@@ -69,6 +70,9 @@ def main():
             cfg[cfg_key] = C.as_list(raw)
         elif kind == "int":
             cfg[cfg_key] = C.as_int(raw, cfg[cfg_key])
+        elif kind == "bool":
+            # 「开关」用文本字段传 1/0（向导的多选控件未验证，见下面 PUSH_MAP 注释）
+            cfg[cfg_key] = C.as_bool(raw, bool(cfg[cfg_key]))
         else:
             cfg[cfg_key] = raw.strip()
         applied[cfg_key] = cfg[cfg_key]

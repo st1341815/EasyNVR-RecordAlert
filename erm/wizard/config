@@ -20,6 +20,12 @@
       },
       {
         "type": "text",
+        "field": "wizard_daily_report_enabled",
+        "label": "每日日报推送（1=启用，0=关闭，留空=不修改）",
+        "initValue": ""
+      },
+      {
+        "type": "text",
         "field": "wizard_daily_report_time",
         "label": "每日统计时间 HH:MM（留空=不修改）",
         "initValue": ""

@@ -514,6 +514,9 @@ def build_daily_report(cfg, now=None):
 # ---------------------------------------------------------------- 调度判定
 
 def next_report_dt(cfg, now=None):
+    """下一次日报时间；日报开关关掉时返回 None（调用方要判空）。"""
+    if not cfg.get("daily_report_enabled", True):
+        return None
     now = now or now_dt(cfg)
     hh, mm = [int(x) for x in cfg["daily_report_time"].split(":")]
     target = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
@@ -528,9 +531,15 @@ def report_due(cfg, state, now=None):
     这样进程重启、NAS 睡眠错过 08:00 也能补发当天一次，而不是漏掉一整天；
     last_report_day 落在 state.json，重启不会重复发。
 
+    v1.0.15：日报开关（daily_report_enabled）关掉时直接不发；state 里的
+    last_report_day / report_retry 原样保留 —— 重新打开开关后，当天到点补发，
+    不会因为「关掉那天已经算发过」而漏一天。
+
     v1.0.14：上一次推送**失败**时不写 last_report_day，而是登记 report_retry
     （带 next_try），到点由这里放行补发 —— 见 run_daily 的注释。
     """
+    if not cfg.get("daily_report_enabled", True):
+        return False
     now = now or now_dt(cfg)
     today = now.strftime("%Y-%m-%d")
     retry = state.get("report_retry") or {}
@@ -824,7 +833,7 @@ def monitor_loop(get_cfg, get_state, stop_event, on_tick=None, lock=None):
     get_cfg() 每轮重新取配置 —— 前端保存配置后**立即生效**，不用重启应用。
     lock：与「前端点『立即检测』」共用的互斥锁。state 必须是同一个对象，
     否则两条扫描路径各持一份 state，会重复发恢复通知（实测踩过）。
-    v1.0.15：有告警补发待办时，唤醒粒度收紧到 ≤5 秒（退避到点就发，不等一个扫描周期）。
+    v1.0.14：有告警补发待办时，唤醒粒度收紧到 ≤5 秒（退避到点就发，不等一个扫描周期）。
     """
     setup_logging()
     logger.info("ERM 监控启动")

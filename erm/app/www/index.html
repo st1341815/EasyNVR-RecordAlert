@@ -58,6 +58,9 @@
   .inline-group{display:flex;gap:8px;align-items:center;flex-wrap:nowrap}
   .inline-group input[type=number]{width:6.5em;flex:0 0 auto}
   .inline-group select{flex:1 1 auto;min-width:0}
+  .inline-group input[type=time]{flex:1 1 auto;min-width:0}
+  .chk-inline{display:flex;align-items:center;gap:6px;margin:0;color:var(--ink);
+              font-size:13px;white-space:nowrap;flex:0 0 auto}
   .hint{font-size:12px;color:var(--muted);margin-top:6px}
   .notes{font-size:12px;color:var(--muted);line-height:1.75;margin-top:14px;
          padding-top:12px;border-top:1px dashed var(--line)}
@@ -169,14 +172,19 @@
           <input type="number" id="alert_silence_minutes" min="0">
         </div>
         <div>
-          <label>每日统计推送时间</label>
-          <input type="time" id="daily_report_time">
+          <label>每日日报</label>
+          <div class="inline-group">
+            <label class="chk-inline"><input type="checkbox" id="daily_report_enabled"> 启用</label>
+            <input type="time" id="daily_report_time">
+          </div>
         </div>
         <div>
           <label>时区</label>
           <input type="text" id="timezone" placeholder="Asia/Shanghai">
         </div>
       </div>
+
+      <div class="hint" id="dailyReportHint"></div>
 
       <div style="margin-top:14px">
         <label>摄像头别名</label>
@@ -187,6 +195,7 @@
         · 录像目录填 EasyNVR 的录像根目录（绝对路径），通道按 <code>&lt;摄像头ID&gt;/profile_N/&lt;日期&gt;/</code> 自动发现，不需要填写通道清单。<br>
         · 扫描间隔不低于 30 秒；告警阈值 = 多少分钟没有新增录像就告警。<br>
         · 重复提醒间隔填 <b>0</b> 表示同一异常只提醒一次，恢复后才重新提醒。<br>
+        · 每日日报：勾选「启用」才自动推送；时间按本地时区 HH:MM，到点即发、当天只发一次（进程重启或 NAS 睡眠错过也会当天补发）。取消勾选后时间框置灰、值保留，页面上「补发昨日日报」仍可手动发。<br>
         · 摄像头别名每行一条：<code>摄像头ID=名称</code>，也可写 <code>ID/profile_1=名称</code>；只影响显示与告警文案。
       </div>
     </div>
@@ -361,6 +370,16 @@ PUSH_CH.forEach(ch => {
   if (box) box.addEventListener('change', syncPushFields);
 });
 
+/* 日报开关：关掉时把时间输入置灰（值不清空，重新打开即恢复），并在指标区说明 */
+function syncDailyFields(){
+  const on = !!$('daily_report_enabled').checked;
+  $('daily_report_time').disabled = !on;
+  $('dailyReportHint').textContent = on
+    ? '' : '日报已关闭：不会自动推送；「补发昨日日报」按钮仍可手动发。';
+}
+
+$('daily_report_enabled').addEventListener('change', syncDailyFields);
+
 function fillConfig(cfg){
   const set = (id, v) => { const el = $(id); if (el) el.value = v == null ? '' : v; };
   set('record_root', cfg.record_root);
@@ -370,7 +389,9 @@ function fillConfig(cfg){
   set('scan_interval', cfg.scan_interval);
   set('alert_threshold_minutes', cfg.alert_threshold_minutes);
   set('alert_silence_minutes', cfg.alert_silence_minutes);
+  $('daily_report_enabled').checked = cfg.daily_report_enabled !== false;
   set('daily_report_time', cfg.daily_report_time);
+  syncDailyFields();
   set('timezone', cfg.timezone);
   set('dingtalk_webhook', cfg.dingtalk_webhook);
   set('dingtalk_secret', cfg.dingtalk_secret);
@@ -470,6 +491,7 @@ $('btnSave').onclick = async () => {
     scan_interval: $('scan_interval').value,
     alert_threshold_minutes: $('alert_threshold_minutes').value,
     alert_silence_minutes: $('alert_silence_minutes').value,
+    daily_report_enabled: $('daily_report_enabled').checked,
     daily_report_time: $('daily_report_time').value,
     timezone: $('timezone').value.trim() || 'Asia/Shanghai',
     enabled_push_channels: ['dingtalk','feishu','wechat','email'].filter(k => $('ch_' + k).checked),

@@ -19,7 +19,22 @@
 > `EasyNVR-RecordAlert-<版本>.fpk` → 飞牛「应用中心 → 手动安装」（**向导不问录像目录与通道**）→ 打开应用填录像目录 → 到「设置 → 授权目录」授权该目录 → 重启应用。
 > 版本变更见 [CHANGELOG.md](CHANGELOG.md)。
 
-### 最新版本 v1.0.14
+### 最新版本 v1.0.15
+
+> **日报可以关，时间可以随便挑。** 配置页「每日日报」多了启用勾选框，取消后不再自动推送，
+> 时间框置灰但保留原值；「下次日报」直接显示 **已关闭**，不再显示一个永远不会触发的假时间。
+>
+> - **开关语义**：关掉期间不写 `last_report_day`，重新打开后当天到点仍补发，不会白丢一天；
+>   「补发昨日日报」按钮不受开关限制，随时能手动发。
+> - **时间自定义**：本地时区任意 `HH:MM`（`06:30` / `23:45` 都行），到点即发、当天只发一次；
+>   重启或 NAS 睡眠错过也会当天补发。`7:5`、`8：00` 这类输入照旧自动规整。
+> - **升级兼容**：旧 `config.json` 没有该键 → 默认 `True`，行为不变。
+> - **安装向导**：新增 `wizard_daily_report_enabled=1|0`，装的时候就能决定开不开。
+>
+> 自检从 155 项扩到 **164 项**，邮件专项 62 项。
+> 完整列表见 [CHANGELOG.md](CHANGELOG.md#v1015--日报开关--时间自定义)。
+
+### 上一版 v1.0.14
 
 > **推送不再被平台限流静默吞掉。** 起因是线上真实故障：飞书在整点推送高峰返回
 > `code=11232 frequency limited` / `11233 chat rate limit`，而旧实现既不重试、
@@ -43,7 +58,7 @@
 erm-fpk/
 ├── build.sh               一键构建（权限校准 + JSON/manifest 校验 + py_compile + fnpack）
 ├── gen_icons.py           生成 64/256 图标（纯标准库，无 Pillow）
-├── selftest.py            155 项断言的自检（不联网，除本地 mock）
+├── selftest.py            164 项断言的自检（不联网，除本地 mock）
 ├── mock_webhook.py        本地 mock 钉钉/企微/飞书（验收推送链路用）
 ├── preview_proxy.py       不登录 fnOS 也能看页面（只读转发，仅供调试）
 ├── docs/                  截图与实测报告
@@ -80,7 +95,7 @@ erm-fpk/
 
 ```bash
 bash build.sh                 # 产出 dist/erm.fpk
-PYTHONPATH= python3 selftest.py   # 155 项断言（先跑这个再打包）
+PYTHONPATH= python3 selftest.py   # 164 项断言（先跑这个再打包）
 bash gen_icons.py             # 只有换图标时才需要
 ```
 
@@ -233,7 +248,7 @@ PYTHONPATH= python3 check_fnpack.py     # 期望 FNPCK_OK（31 项）
 
 ## 8. 自检覆盖
 
-`selftest.py` 155 项断言，重点回归原文档的每个坑：
+`selftest.py` 164 项断言，重点回归原文档的每个坑：
 
 | 断言 | 对应问题 |
 | --- | --- |
@@ -262,7 +277,7 @@ PYTHONPATH= python3 check_fnpack.py     # 期望 FNPCK_OK（31 项）
 「保存配置 → 测试推送 → 自检」，确认存储与调用链路都通。
 
 ```bash
-PYTHONPATH= python3 selftest.py        # 155 项 SELFTEST_ERM_OK
+PYTHONPATH= python3 selftest.py        # 164 项 SELFTEST_ERM_OK
 PYTHONPATH= python3 selftest_email.py  # 59 项
 PYTHONPATH= python3 e2e_email.py       # 13 项 E2E_EMAIL_OK
 ```

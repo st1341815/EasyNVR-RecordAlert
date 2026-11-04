@@ -159,6 +159,11 @@ def test_config_types():
     eq(cfg["alert_silence_minutes"], 0, "B1 静默 0 保留（0=只报一次）")
     eq(cfg["enabled_push_channels"], ["dingtalk", "wechat"], "B2 渠道列表")
     eq(cfg["daily_report_time"], "07:05", "日报时间规整 HH:MM")
+    # v1.0.15：日报开关。旧配置没有这个键 → 必须默认开（升级后行为不变）
+    eq(C.normalize({})["daily_report_enabled"], True, "日报开关默认开（旧配置兼容）")
+    eq(C.normalize({"daily_report_enabled": "0"})["daily_report_enabled"], False, "开关 0 → 关")
+    eq(C.normalize({"daily_report_enabled": "停用"})["daily_report_enabled"], False, "开关「停用」→ 关")
+    eq(C.normalize({"daily_report_enabled": ""})["daily_report_enabled"], False, "开关空串 → 关")
     eq(cfg["notify_recovery"], False, "as_bool 识别「停用」")
     eq(cfg["video_exts"], [".mp4", ".ts"], "后缀补点并小写")
     # 关键回归：旧代码 "60" * 60 得到字符串
@@ -375,6 +380,18 @@ def test_daily_schedule():
     st = {}
     nxt = M.next_report_dt(cfg, base.replace(hour=9))
     eq(nxt.strftime("%Y-%m-%d %H:%M"), "2026-10-30 08:00", "下次日报时间")
+
+    # v1.0.15：日报开关关掉 → 一条都不发，且 next_report_dt 返回 None（调用方要判空）
+    off = C.normalize({"daily_report_enabled": "0", "daily_report_time": "08:00"})
+    eq(M.report_due(off, {}, base.replace(hour=9)), False, "日报关闭 → 到点也不发")
+    eq(M.next_report_dt(off, base.replace(hour=9)), None, "日报关闭 → next_report_dt 返回 None")
+    # 关掉期间不写 last_report_day，重新打开后当天仍能补发（不然会白丢一天）
+    eq(M.report_due(cfg, {"last_report_day": "2026-10-28"}, base.replace(hour=15)), True,
+       "关过又打开 → 当天到点仍补发")
+    # 自定义时间：任意 HH:MM 都按本地时区判定
+    late = C.normalize({"daily_report_time": "23:45"})
+    eq(M.report_due(late, {}, base.replace(hour=23, minute=44)), False, "自定义 23:45 → 23:44 不发")
+    eq(M.report_due(late, {}, base.replace(hour=23, minute=45)), True, "自定义 23:45 → 到点发")
 
 
 def test_report_text():

@@ -37,7 +37,7 @@ def token():
     return (os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or "").strip()
 
 
-def api(tok, path, method="GET", payload=None, raw_file=None):
+def request_url(url, tok, method="GET", payload=None, raw_file=None):
     headers = {
         "Authorization": "Bearer " + tok,
         "Accept": "application/vnd.github+json",
@@ -52,13 +52,17 @@ def api(tok, path, method="GET", payload=None, raw_file=None):
         with open(raw_file, "rb") as f:
             data = f.read()
         headers["Content-Type"] = "application/octet-stream"
-    req = urllib.request.Request(API + path, data=data, headers=headers, method=method)
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=180) as r:
             body = r.read()
             return r.status, (json.loads(body) if body[:1] in (b"{", b"[") else body)
     except urllib.error.HTTPError as e:
         return e.code, e.read().decode("utf-8", "replace")
+
+
+def api(tok, path, method="GET", payload=None, raw_file=None):
+    return request_url(API + path, tok, method, payload, raw_file)
 
 
 def git_push(tok, dry):
@@ -130,7 +134,7 @@ def upload_asset(tok, rel, dry):
     if dry:
         print("  (dry-run) POST %s?name=%s" % (up, name))
         return
-    code, data = api(tok, up.replace(API, "") + "?name=" + name, "POST", raw_file=ASSET)
+    code, data = request_url(up + "?name=" + name, tok, "POST", raw_file=ASSET)
     if code not in (200, 201):
         sys.exit("上传失败：%s %s" % (code, data))
     print("· 上传完成：%s" % data.get("browser_download_url"))

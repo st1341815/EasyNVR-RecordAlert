@@ -37,6 +37,18 @@ DEFAULT_CONFIG = {
     # 日报
     "daily_report_enabled": True,      # 关掉后不再自动发日报（「补发昨日日报」按钮仍可用）
     "daily_report_time": "08:00",      # HH:MM（本地时区），到点即发、当天只发一次
+    # 日报统计区间：HH:MM 含端点，from == to 表示整天 24 小时。
+    #   to > from  → 同一个自然日内，如 08:00–18:00
+    #   to <= from → 跨天，如 08:00–次日 08:00（填 08:00 与 08:00 即 24 小时）
+    "report_window_from": "00:00",
+    "report_window_to": "23:59",
+    # 日报推送日：1=周一 … 7=周日。空列表按「每天」处理（不会因为漏填而永不推送）
+    "report_weekdays": [1, 2, 3, 4, 5, 6, 7],
+    # 告警推送计划：只在「这些天的这个时段」内真发推送，其余时间照常检测、只写日志
+    # （v1.0.16：夜里/周末不想被吵，就把它调成工作日 08:00–18:00）
+    "alert_push_weekdays": [1, 2, 3, 4, 5, 6, 7],
+    "alert_window_from": "00:00",      # 起止相同 = 全天；from > to 表示跨夜，如 22:00–07:00
+    "alert_window_to": "23:59",
     # 推送
     "enabled_push_channels": [],       # 装了没配 webhook 就不推送，只写日志（避免每轮报失败）
     "dingtalk_webhook": "",
@@ -163,6 +175,40 @@ def norm_hhmm(value, default="08:00"):
     return "%02d:%02d" % (h, m)
 
 
+WEEKDAY_NAMES = {1: "周一", 2: "周二", 3: "周三", 4: "周四", 5: "周五", 6: "周六", 7: "周日"}
+WEEKDAY_ALL = (1, 2, 3, 4, 5, 6, 7)
+WEEKDAY_WORK = (1, 2, 3, 4, 5)
+WEEKDAY_WEEKEND = (6, 7)
+
+
+def norm_weekdays(value, default=WEEKDAY_ALL):
+    """推送日：[1..7]（1=周一，与 datetime.isoweekday() 对齐）。
+
+    接受 [1,3] / "1,3,5" / "1 3 5" / "周一,周三"；非法项丢掉；**空结果回落 default**。
+    「空」不能解释成「永不推送」——用户漏勾一次就永久静默，属于最难排查的坑。
+    """
+    raw = value
+    if isinstance(raw, str):
+        s = raw.strip().lower()
+        for name, num in (("星期一", 1), ("星期二", 2), ("星期三", 3), ("星期四", 4),
+                          ("星期五", 5), ("星期六", 6), ("星期日", 7), ("星期天", 7)):
+            s = s.replace(name, str(num))
+        for name, num in (("周一", 1), ("周二", 2), ("周三", 3), ("周四", 4),
+                          ("周五", 5), ("周六", 6), ("周日", 7), ("周天", 7)):
+            s = s.replace(name, str(num))
+        s = s.replace("，", ",").replace("；", ",").replace(";", ",")
+        s = s.replace("\u3000", " ").replace(" ", ",")
+        raw = s
+    out = []
+    for item in as_list(raw):
+        n = as_int(item, 0, 0, 9)
+        if 1 <= n <= 7 and n not in out:
+            out.append(n)
+    if not out:
+        return list(default)
+    return sorted(out)
+
+
 def is_mail_addr(value) -> bool:
     """够用的邮箱校验：有且只有一个 @，两边都不空，域名带点。不追求 RFC 完备。"""
     s = str(value or "").strip().strip("<>").strip()
@@ -223,6 +269,14 @@ def normalize(raw):
     # 旧配置里没有这个键 → 默认开（升级后行为不变，不会突然停掉日报）
     cfg["daily_report_enabled"] = as_bool(cfg.get("daily_report_enabled"), True)
     cfg["daily_report_time"] = norm_hhmm(cfg.get("daily_report_time"), "08:00")
+    # v1.0.16：日报统计区间 + 推送日（旧配置没有 → 00:00–23:59 / 每天，行为不变）
+    cfg["report_window_from"] = norm_hhmm(cfg.get("report_window_from"), "00:00")
+    cfg["report_window_to"] = norm_hhmm(cfg.get("report_window_to"), "23:59")
+    cfg["report_weekdays"] = norm_weekdays(cfg.get("report_weekdays"))
+    # 告警推送计划：默认每天 + 全天（旧配置升级后照旧 24 小时都推）
+    cfg["alert_push_weekdays"] = norm_weekdays(cfg.get("alert_push_weekdays"))
+    cfg["alert_window_from"] = norm_hhmm(cfg.get("alert_window_from"), "00:00")
+    cfg["alert_window_to"] = norm_hhmm(cfg.get("alert_window_to"), "23:59")
 
     channels = [c for c in as_list(cfg.get("enabled_push_channels")) if c in PUSH_CHANNELS]
     if not channels:

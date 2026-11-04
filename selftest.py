@@ -394,6 +394,105 @@ def test_daily_schedule():
     eq(M.report_due(late, {}, base.replace(hour=23, minute=45)), True, "自定义 23:45 → 到点发")
 
 
+def test_push_plan_and_report_window():
+    """v1.0.16：日报统计区间（可跨天）+ 日报推送日 + 告警推送计划。"""
+    tz = M.get_tz(C.normalize({}))
+    d = C.normalize({})
+    eq(d["report_window_from"], "00:00", "默认统计区间起点 00:00")
+    eq(d["report_window_to"], "23:59", "默认统计区间终点 23:59")
+    eq(d["report_weekdays"], [1, 2, 3, 4, 5, 6, 7], "默认日报推送日 = 每天")
+    eq(d["alert_push_weekdays"], [1, 2, 3, 4, 5, 6, 7], "默认告警推送日 = 每天")
+    eq(d["alert_window_from"], "00:00", "默认告警时段 00:00")
+    eq(d["alert_window_to"], "23:59", "默认告警时段 23:59")
+    eq(C.normalize({"report_weekdays": "周一,周三"})["report_weekdays"], [1, 3], "中文星期归一")
+    eq(C.normalize({"alert_push_weekdays": "1 3 5"})["alert_push_weekdays"], [1, 3, 5], "空格分隔归一")
+    eq(C.normalize({"report_weekdays": ""})["report_weekdays"], [1, 2, 3, 4, 5, 6, 7],
+       "空 → 每天（绝不能变成「永不推送」）")
+    eq(C.normalize({"report_weekdays": [0, 8, 9]})["report_weekdays"], [1, 2, 3, 4, 5, 6, 7],
+       "非法星期 → 每天")
+    eq(C.normalize({"report_window_from": "8：00"})["report_window_from"], "08:00", "全角冒号归一")
+
+    # ---- 统计区间
+    now = datetime(2026, 10, 29, 9, 0, tzinfo=tz)          # 周四 09:00
+    s, e = M.report_window_bounds(C.normalize({}), now)
+    eq(datetime.fromtimestamp(s, tz).strftime("%Y-%m-%d %H:%M"), "2026-10-28 00:00",
+       "默认区间：昨天 00:00")
+    eq(datetime.fromtimestamp(e, tz).strftime("%Y-%m-%d %H:%M"), "2026-10-29 00:00",
+       "默认区间：到今天 00:00（23:59 那一分钟不丢）")
+
+    cfg24 = C.normalize({"report_window_from": "08:00", "report_window_to": "08:00"})
+    s, e = M.report_window_bounds(cfg24, now)
+    eq(datetime.fromtimestamp(s, tz).strftime("%m-%d %H:%M"), "10-28 08:00", "08:00–08:00：起点昨天 08:00")
+    eq(datetime.fromtimestamp(e, tz).strftime("%m-%d %H:%M"), "10-29 08:01", "08:00–08:00：终点含 08:00 分钟")
+    eq(e - s, 86400 + 60, "08:00–08:00 区间 = 24 小时 + 1 分钟")
+
+    cfg12 = C.normalize({"report_window_from": "18:00", "report_window_to": "06:00"})
+    s, e = M.report_window_bounds(cfg12, now)
+    eq(datetime.fromtimestamp(s, tz).strftime("%m-%d %H:%M"), "10-28 18:00", "18:00–次日 06:00：起点")
+    eq(datetime.fromtimestamp(e, tz).strftime("%m-%d %H:%M"), "10-29 06:01", "18:00–次日 06:00：终点")
+    eq(e - s, 12 * 3600 + 60, "跨夜 12 小时区间长度")
+
+    early = datetime(2026, 10, 29, 5, 0, tzinfo=tz)        # 还没到 06:00
+    s, e = M.report_window_bounds(cfg12, early)
+    eq(datetime.fromtimestamp(s, tz).strftime("%m-%d %H:%M"), "10-27 18:00", "未到终点：起点再退一天")
+    eq(datetime.fromtimestamp(e, tz).strftime("%m-%d %H:%M"), "10-28 06:01", "未到终点：终点用昨天 06:00")
+    eq(M._report_span_text(cfg12, s, e), "2026-10-27 18:00 — 2026-10-28 06:00", "跨天区间文案")
+
+    # ---- 告警推送计划
+    ok(M.alert_push_allowed(C.normalize({}), datetime(2026, 10, 31, 3, 0, tzinfo=tz)),
+       "默认每天+全天：凌晨 3 点也允许推送")
+    work = C.normalize({"alert_push_weekdays": "1,2,3,4,5",
+                        "alert_window_from": "08:00", "alert_window_to": "18:00"})
+    ok(M.alert_push_allowed(work, datetime(2026, 10, 28, 10, 0, tzinfo=tz)), "工作日 10:00 → 允许")
+    ok(not M.alert_push_allowed(work, datetime(2026, 10, 28, 20, 0, tzinfo=tz)), "工作日 20:00 → 静默")
+    ok(not M.alert_push_allowed(work, datetime(2026, 10, 31, 10, 0, tzinfo=tz)), "周六 10:00 → 静默")
+    ok(M.alert_push_allowed(work, datetime(2026, 10, 28, 18, 0, tzinfo=tz)), "18:00 端点含在内")
+    night = C.normalize({"alert_window_from": "22:00", "alert_window_to": "07:00"})
+    ok(M.alert_push_allowed(night, datetime(2026, 10, 28, 23, 30, tzinfo=tz)), "跨夜 23:30 → 允许")
+    ok(M.alert_push_allowed(night, datetime(2026, 10, 28, 6, 59, tzinfo=tz)), "跨夜 06:59 → 允许")
+    ok(not M.alert_push_allowed(night, datetime(2026, 10, 28, 12, 0, tzinfo=tz)), "跨夜 12:00 → 静默")
+    same = C.normalize({"alert_window_from": "08:00", "alert_window_to": "08:00"})
+    ok(M.alert_push_allowed(same, datetime(2026, 10, 28, 15, 0, tzinfo=tz)), "起止相同 = 全天")
+
+    eq(M.push_plan_text(work), "工作日 08:00–18:00", "推送计划文案")
+    eq(M.push_plan_text(night), "每天 22:00–07:00（跨夜）", "跨夜文案带标注")
+    eq(M.push_plan_text(C.normalize({})), "每天 全天", "全天文案")
+
+    # ---- 日报推送日
+    weekend_off = C.normalize({"daily_report_time": "08:00", "report_weekdays": "1,2,3,4,5"})
+    sat = datetime(2026, 10, 31, 9, 0, tzinfo=tz)          # 周六
+    eq(M.report_due(weekend_off, {}, sat), False, "非推送日不发日报")
+    eq(M.next_report_dt(weekend_off, datetime(2026, 10, 30, 18, 0, tzinfo=tz)).strftime("%Y-%m-%d %H:%M"),
+       "2026-11-02 08:00", "周五 18:00 看到的下次日报 = 下周一 08:00")
+    eq(M.next_report_dt(weekend_off, sat).strftime("%Y-%m-%d %H:%M"), "2026-11-02 08:00",
+       "周六看到的下次日报 = 周一 08:00")
+    eq(M.next_report_dt(C.normalize({"daily_report_time": "08:00"}), sat).strftime("%Y-%m-%d %H:%M"),
+       "2026-11-01 08:00", "每天推送时，周六看到的就是周日 08:00")
+
+    # ---- run_scan 闸门：时段外只刷新检测结果，不推进告警状态
+    quiet_cfg = C.normalize({"record_root": os.path.join(TMP_VAR, "no-such-dir"),
+                             "alert_push_weekdays": "1,2,3,4,5",
+                             "alert_window_from": "08:00", "alert_window_to": "18:00"})
+    orig_now = M.now_dt
+    try:
+        M.now_dt = lambda cfg: sat                            # 周六 09:00（非推送日）
+        st = {}
+        res = M.run_scan(quiet_cfg, st)
+        ok(res.get("quiet") is True, "时段外：run_scan 标记 quiet")
+        eq(res.get("events"), [], "时段外：不产生任何推送事件")
+        eq(st.get("channels"), {}, "时段外：通道告警状态不推进（夜间断流不会被静默吃掉）")
+        ok(st.get("quiet_since"), "时段外：记录 quiet_since 只写一次日志")
+
+        M.now_dt = lambda cfg: datetime(2026, 10, 28, 10, 0, tzinfo=tz)   # 周三 10:00
+        st2 = {}
+        res2 = M.run_scan(quiet_cfg, st2)
+        ok(not res2.get("quiet"), "时段内：正常判定")
+        eq(len(res2.get("events") or []), 1, "时段内：目录不存在 → 照样产生告警事件")
+        ok(not st2.get("quiet_since"), "时段内：清掉 quiet_since")
+    finally:
+        M.now_dt = orig_now
+
+
 def test_report_text():
     root, _files = mk_record_tree(os.path.join(TMP_VAR, "record3"))
     cfg = C.normalize({"record_root": root, "video_exts": ".mp4",
@@ -736,6 +835,7 @@ def main():
         for fn in (test_config_types, test_config_io, test_channels_and_evaluate,
                    test_easynvr_layout, test_online_streak,
                    test_scan_alert_and_silence, test_daily_schedule, test_report_text,
+                   test_push_plan_and_report_window,
                    test_normalize_keeps_secret):
             fn()
         test_push(webhook)

@@ -61,6 +61,14 @@
   .inline-group input[type=time]{flex:1 1 auto;min-width:0}
   .chk-inline{display:flex;align-items:center;gap:6px;margin:0;color:var(--ink);
               font-size:13px;white-space:nowrap;flex:0 0 auto}
+  /* 卡片内的子分区（v1.0.16：日报 / 告警推送计划） */
+  .subcard{border-top:1px dashed var(--line);margin-top:14px;padding-top:12px}
+  .subcard h3{font-size:13px;font-weight:650;margin:0 0 10px;color:var(--ink)}
+  .weekdays{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .weekdays label{display:flex;align-items:center;gap:4px;margin:0;font-size:13px;
+                  color:var(--ink);white-space:nowrap}
+  button.mini{padding:4px 11px;font-size:12px;border-radius:999px}
+  .dash{color:var(--muted);flex:0 0 auto}
   .hint{font-size:12px;color:var(--muted);margin-top:6px}
   .notes{font-size:12px;color:var(--muted);line-height:1.75;margin-top:14px;
          padding-top:12px;border-top:1px dashed var(--line)}
@@ -121,12 +129,13 @@
       <span>上次检测 <b id="mLast">—</b></span>
       <span>下次检测 <b id="mNext">—</b></span>
       <span>下次日报 <b id="mNextDaily">—</b></span>
+      <span>告警推送计划 <b id="mPlan">—</b></span>
       <span>通道布局 <b id="mLayout">—</b></span>
     </div>
     <div class="row" style="margin-top:14px">
       <button class="primary" id="btnScan">立即检测</button>
       <button id="btnTest">测试推送</button>
-      <button id="btnDaily">补发昨日日报</button>
+      <button id="btnDaily">补发最近一期日报</button>
       <button id="btnLogs">查看日志</button>
       <button id="btnDoctor">一键自检</button>
     </div>
@@ -172,19 +181,10 @@
           <input type="number" id="alert_silence_minutes" min="0">
         </div>
         <div>
-          <label>每日日报</label>
-          <div class="inline-group">
-            <label class="chk-inline"><input type="checkbox" id="daily_report_enabled"> 启用</label>
-            <input type="time" id="daily_report_time">
-          </div>
-        </div>
-        <div>
           <label>时区</label>
           <input type="text" id="timezone" placeholder="Asia/Shanghai">
         </div>
       </div>
-
-      <div class="hint" id="dailyReportHint"></div>
 
       <div style="margin-top:14px">
         <label>摄像头别名</label>
@@ -195,7 +195,7 @@
         · 录像目录填 EasyNVR 的录像根目录（绝对路径），通道按 <code>&lt;摄像头ID&gt;/profile_N/&lt;日期&gt;/</code> 自动发现，不需要填写通道清单。<br>
         · 扫描间隔不低于 30 秒；告警阈值 = 多少分钟没有新增录像就告警。<br>
         · 重复提醒间隔填 <b>0</b> 表示同一异常只提醒一次，恢复后才重新提醒。<br>
-        · 每日日报：勾选「启用」才自动推送；时间按本地时区 HH:MM，到点即发、当天只发一次（进程重启或 NAS 睡眠错过也会当天补发）。取消勾选后时间框置灰、值保留，页面上「补发昨日日报」仍可手动发。<br>
+        · 每日日报与告警推送计划在下面的「推送渠道」卡片里设置。<br>
         · 摄像头别名每行一条：<code>摄像头ID=名称</code>，也可写 <code>ID/profile_1=名称</code>；只影响显示与告警文案。
       </div>
     </div>
@@ -268,6 +268,89 @@
       <div class="notes">
         · 钉钉机器人用「加签」安全设置时必须同时填加签密钥，否则会被拒收（errcode 310000）；用「自定义关键词」时留空。<br>
         · 没勾选任何渠道时，告警只写运行日志（不会刷失败记录）；取消勾选不会清空已填的 Webhook，重新勾选即可恢复。
+      </div>
+
+      <!-- v1.0.16：日报与推送计划都收进「推送渠道」卡片 -->
+      <div class="subcard">
+        <h3>每日日报</h3>
+        <div class="checks" style="margin-top:0">
+          <label><input type="checkbox" id="daily_report_enabled"> 启用日报</label>
+        </div>
+        <div class="grid" style="margin-top:10px">
+          <div>
+            <label>推送时间</label>
+            <input type="time" id="daily_report_time">
+          </div>
+          <div>
+            <label>统计区间（起 — 止）</label>
+            <div class="inline-group">
+              <input type="time" id="report_window_from">
+              <span class="dash">—</span>
+              <input type="time" id="report_window_to">
+            </div>
+          </div>
+          <div>
+            <label>推送日</label>
+            <div class="weekdays" id="reportWeekdays">
+              <label><input type="checkbox" data-d="1">一</label>
+              <label><input type="checkbox" data-d="2">二</label>
+              <label><input type="checkbox" data-d="3">三</label>
+              <label><input type="checkbox" data-d="4">四</label>
+              <label><input type="checkbox" data-d="5">五</label>
+              <label><input type="checkbox" data-d="6">六</label>
+              <label><input type="checkbox" data-d="7">日</label>
+            </div>
+          </div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button type="button" class="mini" data-preset="reportWeekdays" data-days="1234567">每天</button>
+          <button type="button" class="mini" data-preset="reportWeekdays" data-days="12345">工作日</button>
+          <button type="button" class="mini" data-preset="reportWeekdays" data-days="67">周末</button>
+        </div>
+        <div class="hint" id="dailyReportHint"></div>
+        <div class="notes" style="margin-top:10px">
+          · 时间按本地时区 HH:MM，到点即发、当天只发一次；进程重启或 NAS 睡眠错过也会当天补发。<br>
+          · 统计区间 HH:MM <b>含端点</b>；默认 00:00–23:59 就是「昨天整天」。起 &gt; 止 表示跨天：
+          <code>08:00–08:00</code> = 24 小时，<code>18:00–次日 06:00</code> = 12 小时。<br>
+          · 推送日只约束自动日报；「补发最近一期日报」按钮随时可手动发。
+        </div>
+      </div>
+
+      <div class="subcard">
+        <h3>告警推送计划</h3>
+        <div class="grid">
+          <div>
+            <label>推送时段（起 — 止）</label>
+            <div class="inline-group">
+              <input type="time" id="alert_window_from">
+              <span class="dash">—</span>
+              <input type="time" id="alert_window_to">
+            </div>
+          </div>
+          <div>
+            <label>推送日</label>
+            <div class="weekdays" id="alertWeekdays">
+              <label><input type="checkbox" data-d="1">一</label>
+              <label><input type="checkbox" data-d="2">二</label>
+              <label><input type="checkbox" data-d="3">三</label>
+              <label><input type="checkbox" data-d="4">四</label>
+              <label><input type="checkbox" data-d="5">五</label>
+              <label><input type="checkbox" data-d="6">六</label>
+              <label><input type="checkbox" data-d="7">日</label>
+            </div>
+          </div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button type="button" class="mini" data-preset="alertWeekdays" data-days="1234567">每天</button>
+          <button type="button" class="mini" data-preset="alertWeekdays" data-days="12345">工作日</button>
+          <button type="button" class="mini" data-preset="alertWeekdays" data-days="67">周末</button>
+        </div>
+        <div class="notes" style="margin-top:10px">
+          · 只在「勾选的星期 + 这个时段」内真发推送，其余时间照常检测、只写日志。<br>
+          · 时段外发生断流不会被"吃掉"：进入时段后的第一轮扫描会立刻补发一条告警。<br>
+          · 起止相同 = 全天；起 &gt; 止 表示跨夜（如 <code>22:00–07:00</code>）。页面上的「立即检测」不受时段限制。<br>
+          · 日报只受上面的「日报推送日」约束，不受这里影响。
+        </div>
       </div>
 
       <div class="row" style="margin-top:16px">
@@ -370,12 +453,33 @@ PUSH_CH.forEach(ch => {
   if (box) box.addEventListener('change', syncPushFields);
 });
 
-/* 日报开关：关掉时把时间输入置灰（值不清空，重新打开即恢复），并在指标区说明 */
+/* ---------- 推送日（星期）控件 ---------- */
+function getWeekdays(boxId){
+  return [...document.querySelectorAll('#' + boxId + ' input[data-d]')]
+    .filter(i => i.checked).map(i => +i.dataset.d).sort((a, b) => a - b);
+}
+function setWeekdays(boxId, days){
+  const on = (days || []).map(Number);
+  document.querySelectorAll('#' + boxId + ' input[data-d]').forEach(i => {
+    i.checked = on.includes(+i.dataset.d);
+  });
+}
+document.querySelectorAll('button[data-preset]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    setWeekdays(btn.dataset.preset, btn.dataset.days.split(''));
+  });
+});
+
+/* 日报开关：关掉时把日报相关控件置灰（值不清空，重新打开即恢复） */
 function syncDailyFields(){
   const on = !!$('daily_report_enabled').checked;
-  $('daily_report_time').disabled = !on;
+  ['daily_report_time', 'report_window_from', 'report_window_to'].forEach(id => {
+    const el = $(id); if (el) el.disabled = !on;
+  });
+  document.querySelectorAll('#reportWeekdays input[data-d]').forEach(i => { i.disabled = !on; });
+  document.querySelectorAll('button[data-preset="reportWeekdays"]').forEach(b => { b.disabled = !on; });
   $('dailyReportHint').textContent = on
-    ? '' : '日报已关闭：不会自动推送；「补发昨日日报」按钮仍可手动发。';
+    ? '' : '日报已关闭：不会自动推送；「补发最近一期日报」按钮仍可手动发。';
 }
 
 $('daily_report_enabled').addEventListener('change', syncDailyFields);
@@ -391,6 +495,12 @@ function fillConfig(cfg){
   set('alert_silence_minutes', cfg.alert_silence_minutes);
   $('daily_report_enabled').checked = cfg.daily_report_enabled !== false;
   set('daily_report_time', cfg.daily_report_time);
+  set('report_window_from', cfg.report_window_from || '00:00');
+  set('report_window_to', cfg.report_window_to || '23:59');
+  setWeekdays('reportWeekdays', cfg.report_weekdays || [1,2,3,4,5,6,7]);
+  set('alert_window_from', cfg.alert_window_from || '00:00');
+  set('alert_window_to', cfg.alert_window_to || '23:59');
+  setWeekdays('alertWeekdays', cfg.alert_push_weekdays || [1,2,3,4,5,6,7]);
   syncDailyFields();
   set('timezone', cfg.timezone);
   set('dingtalk_webhook', cfg.dingtalk_webhook);
@@ -425,6 +535,7 @@ function render(d){
   $('mLast').textContent = d.last_check_str || '—';
   $('mNext').textContent = d.next_scan_sec > 0 ? ('约 ' + d.next_scan_sec + ' 秒后') : '即将进行';
   $('mNextDaily').textContent = d.next_daily_str || '—';
+  $('mPlan').textContent = (d.push_plan || '—') + (d.push_allowed === false ? '（当前静默）' : '');
   const LAY = {camera:'摄像头聚合', profile:'按 profile 分开'};
   $('mLayout').textContent = (LAY[d.layout] || d.layout || '—') + '·' + (d.channel_count || 0) + ' 个通道';
   $('rootErr').textContent = d.error ? ('⚠ ' + d.error) : '';
@@ -493,6 +604,12 @@ $('btnSave').onclick = async () => {
     alert_silence_minutes: $('alert_silence_minutes').value,
     daily_report_enabled: $('daily_report_enabled').checked,
     daily_report_time: $('daily_report_time').value,
+    report_window_from: $('report_window_from').value || '00:00',
+    report_window_to: $('report_window_to').value || '23:59',
+    report_weekdays: getWeekdays('reportWeekdays'),
+    alert_window_from: $('alert_window_from').value || '00:00',
+    alert_window_to: $('alert_window_to').value || '23:59',
+    alert_push_weekdays: getWeekdays('alertWeekdays'),
     timezone: $('timezone').value.trim() || 'Asia/Shanghai',
     enabled_push_channels: ['dingtalk','feishu','wechat','email'].filter(k => $('ch_' + k).checked),
     notify_recovery: $('notify_recovery').checked,

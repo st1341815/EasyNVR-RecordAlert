@@ -75,11 +75,97 @@ def fmt_ts(cfg, ts):
 
 
 def yesterday_bounds(cfg, now=None):
-    """昨天 00:00 ~ 今天 00:00 的时间戳（按配置时区）。"""
+    """昨天 00:00 ~ 今天 00:00 的时间戳（按配置时区）。保留给旧调用方/测试。"""
     now = now or now_dt(cfg)
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
     start = today - timedelta(days=1)
     return int(start.timestamp()), int(today.timestamp())
+
+
+def hm_to_min(value, default=0):
+    """'08:30' → 510。容忍 '8：30' / '8:30'；非法值回落 default 分钟数。"""
+    try:
+        parts = str(value or "").replace("：", ":").strip().split(":")
+        return int(parts[0]) * 60 + int(parts[1])
+    except (TypeError, ValueError, IndexError):
+        return default
+
+
+def report_window_bounds(cfg, now=None):
+    """日报的统计区间，返回半开区间 [start_ts, end_ts)。
+
+    v1.0.16：区间可自定义（report_window_from / report_window_to），HH:MM **含端点**，
+    所以内部 end 多加 1 分钟 —— 默认 00:00–23:59 的结果是
+    `[昨天 00:00, 今天 00:00)`，与 v1.0.15 的「昨天整天」完全一致（不丢 23:59 的文件）。
+
+    · to > from  → 同一个自然日内（08:00–18:00）
+    · to <= from → 跨天（08:00–次日 08:00），from == to 视为整天 24 小时
+
+    「最近一个完整区间」：把 to 吸附到今天，若还没到就退回昨天 —— 日报在 09:00 发、
+    区间 08:00–次日 08:00 时，统计的是昨天 08:00 到今天 08:00。
+    """
+    now = now or now_dt(cfg)
+    f_min = hm_to_min(cfg.get("report_window_from"), 0)
+    t_min = hm_to_min(cfg.get("report_window_to"), 23 * 60 + 59)
+    span = (t_min - f_min) % 1440 or 1440          # from == to → 整整 24 小时
+    end = now.replace(hour=t_min // 60, minute=t_min % 60, second=0, microsecond=0)
+    if end > now:
+        end -= timedelta(days=1)
+    start = end - timedelta(minutes=span)          # 先算起点，再给终点补「含端点」的 1 分钟
+    return int(start.timestamp()), int((end + timedelta(minutes=1)).timestamp())
+
+
+def _in_window(cur_min, from_min, to_min):
+    """分钟数是否落在 [from, to] 内。from == to = 全天；from > to = 跨夜。"""
+    if from_min == to_min:
+        return True
+    if from_min < to_min:
+        return from_min <= cur_min <= to_min
+    return cur_min >= from_min or cur_min <= to_min
+
+
+def alert_push_allowed(cfg, now=None):
+    """告警推送计划：推送日 + 推送时段。false = 只检测、不推送（不消耗静默窗口）。"""
+    now = now or now_dt(cfg)
+    days = cfg.get("alert_push_weekdays") or list(C.DEFAULT_CONFIG["alert_push_weekdays"])
+    if now.isoweekday() not in days:
+        return False
+    return _in_window(now.hour * 60 + now.minute,
+                      hm_to_min(cfg.get("alert_window_from"), 0),
+                      hm_to_min(cfg.get("alert_window_to"), 23 * 60 + 59))
+
+
+def weekdays_text(days):
+    days = sorted(set(int(d) for d in (days or [])))
+    if days == list(C.WEEKDAY_ALL):
+        return "每天"
+    if days == list(C.WEEKDAY_WORK):
+        return "工作日"
+    if days == list(C.WEEKDAY_WEEKEND):
+        return "周末"
+    if not days:
+        return "—"
+    return "、".join(C.WEEKDAY_NAMES.get(d, str(d)) for d in days)
+
+
+def window_text(from_s, to_s):
+    f, t = hm_to_min(from_s, 0), hm_to_min(to_s, 23 * 60 + 59)
+    # 00:00–23:59 与「起止相同」都等价于全天，文案统一说「全天」
+    if f == t or (f == 0 and t == 23 * 60 + 59):
+        return "全天"
+    text = "%s–%s" % (from_s, to_s)
+    return text + "（跨夜）" if f > t else text
+
+
+def push_plan_text(cfg):
+    """状态页用：把「工作日 08:00–18:00」拼成一句话。"""
+    return "%s %s" % (weekdays_text(cfg.get("alert_push_weekdays")),
+                      window_text(cfg.get("alert_window_from"), cfg.get("alert_window_to")))
+
+
+def report_plan_text(cfg):
+    return "%s %s" % (weekdays_text(cfg.get("report_weekdays")),
+                      window_text(cfg.get("report_window_from"), cfg.get("report_window_to")))
 
 
 # ---------------------------------------------------------------- 通道解析
@@ -485,11 +571,25 @@ def build_recovery_message(cfg, ch):
     )
 
 
+def _report_span_text(cfg, start_ts, end_ts):
+    """区间文案：同一天写「2026-11-03 00:00 — 23:59」，跨天写全两个日期。
+
+    end_ts 是内部半开上界（已 +1 分钟），显示时要减回去，不然会显示成 24:00。
+    """
+    tz = get_tz(cfg)
+    sdt = datetime.fromtimestamp(start_ts, tz)
+    edt = datetime.fromtimestamp(max(start_ts, end_ts - 60), tz)
+    if sdt.date() == edt.date():
+        return "%s %s — %s" % (sdt.strftime("%Y-%m-%d"), sdt.strftime("%H:%M"),
+                               edt.strftime("%H:%M"))
+    return "%s — %s" % (sdt.strftime("%Y-%m-%d %H:%M"), edt.strftime("%Y-%m-%d %H:%M"))
+
+
 def build_daily_report(cfg, now=None):
     now = now or now_dt(cfg)
-    start, end = yesterday_bounds(cfg, now)
+    start, end = report_window_bounds(cfg, now)
     ev = evaluate(cfg, now=now, window=(start, end))
-    day = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+    day = datetime.fromtimestamp(start, get_tz(cfg)).strftime("%Y-%m-%d")
     if ev.get("error") and not ev["channels"]:
         return "【EasyNVR 录像日报 %s】\n统计失败：%s" % (day, ev["error"])
     lines, total, bad = [], 0, []
@@ -500,7 +600,7 @@ def build_daily_report(cfg, now=None):
             bad.append("%s %s" % (channel_title(ch), ch["tag"]))
     body = [
         "【EasyNVR 录像日报 %s】" % day,
-        "统计区间：%s 00:00 — 24:00" % day,
+        "统计区间：%s" % _report_span_text(cfg, start, end),
         "",
         *lines,
         "",
@@ -514,15 +614,22 @@ def build_daily_report(cfg, now=None):
 # ---------------------------------------------------------------- 调度判定
 
 def next_report_dt(cfg, now=None):
-    """下一次日报时间；日报开关关掉时返回 None（调用方要判空）。"""
+    """下一次日报时间；日报开关关掉时返回 None（调用方要判空）。
+
+    v1.0.16：按 report_weekdays 跳过非推送日 —— 设了「只在工作日」时，
+    周五 18:00 看到的下次日报是下周一 08:00，而不是周六 08:00。
+    """
     if not cfg.get("daily_report_enabled", True):
         return None
     now = now or now_dt(cfg)
     hh, mm = [int(x) for x in cfg["daily_report_time"].split(":")]
+    days = cfg.get("report_weekdays") or list(C.WEEKDAY_ALL)
     target = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
-    if target <= now:
-        target += timedelta(days=1)
-    return target
+    for i in range(0, 8):                       # 最多往前找一周（今天 + 7 天）
+        cand = target + timedelta(days=i)
+        if cand > now and cand.isoweekday() in days:
+            return cand
+    return None                                 # 理论上到不了：norm_weekdays 兜底每天
 
 
 def report_due(cfg, state, now=None):
@@ -530,6 +637,9 @@ def report_due(cfg, state, now=None):
 
     这样进程重启、NAS 睡眠错过 08:00 也能补发当天一次，而不是漏掉一整天；
     last_report_day 落在 state.json，重启不会重复发。
+
+    v1.0.16：非 report_weekdays 的日子不发（周末不打扰），也不写 last_report_day；
+    「补发昨日日报」按钮（manual）不受推送日限制。
 
     v1.0.15：日报开关（daily_report_enabled）关掉时直接不发；state 里的
     last_report_day / report_retry 原样保留 —— 重新打开开关后，当天到点补发，
@@ -541,6 +651,8 @@ def report_due(cfg, state, now=None):
     if not cfg.get("daily_report_enabled", True):
         return False
     now = now or now_dt(cfg)
+    if now.isoweekday() not in (cfg.get("report_weekdays") or list(C.WEEKDAY_ALL)):
+        return False
     today = now.strftime("%Y-%m-%d")
     retry = state.get("report_retry") or {}
     if isinstance(retry, dict) and retry.get("day") == today:
@@ -554,11 +666,30 @@ def report_due(cfg, state, now=None):
 # ---------------------------------------------------------------- 执行
 
 def run_scan(cfg, state, force_alert=False):
-    """一轮扫描：判定 → 告警（含静默）→ 恢复通知 → 落 state。"""
+    """一轮扫描：判定 → 告警（含静默）→ 恢复通知 → 落 state。
+
+    v1.0.16：先过「告警推送计划」闸门。时段外（夜里/周末）**只刷新检测结果**，
+    不动通道告警状态、不推送 —— 好处是夜间断流不会被静默规则「吃掉」：
+    早上一进时段，因为 alerting 仍是 False、last_alert_time 没推进，立刻就会告警。
+    手动「立即检测」（force_alert）不受限制，用户就在页面盯着。
+    """
     now_ts = int(time.time())
     ev = evaluate(cfg, with_counts=False)
     state.setdefault("channels", {})
     events = []
+
+    allowed = alert_push_allowed(cfg, now_dt(cfg))
+    if not allowed and not force_alert:
+        state["last_check"] = now_ts
+        state["last_result"] = ev
+        if not state.get("quiet_since"):
+            state["quiet_since"] = now_ts
+            logger.info("进入推送时段外（%s）：告警照常检测，但不推送；进入时段后立即补发",
+                        push_plan_text(cfg))
+        C.save_state(state)
+        return {"result": ev, "events": [], "pushed": [], "quiet": True}
+    if allowed and state.pop("quiet_since", None):
+        logger.info("离开推送时段外，恢复正常推送（%s）", push_plan_text(cfg))
 
     if ev.get("error") and not ev["channels"]:
         # 全局错误（目录没配/不可读/没有通道）：也要告警，否则用户以为在监控

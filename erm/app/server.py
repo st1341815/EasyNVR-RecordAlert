@@ -30,7 +30,7 @@ from urllib.parse import parse_qs, urlparse
 
 APP_NAME = "erm"
 GATEWAY_PREFIX = "/app/" + APP_NAME
-VERSION = "1.0.15"
+VERSION = "1.0.16"
 
 SELF = os.path.abspath(__file__)
 APP_DEST = os.path.dirname(SELF)           # app/ 的内容直接铺到 target 根
@@ -87,6 +87,20 @@ def validate(cfg):
             if mm == 0 and "feishu" in chans:
                 warnings.append("日报时间设为整点 %02d:00：飞书在整点推送高峰常返回 11232/11233 限流，"
                                 "建议错峰到 %02d:%02d（失败也会自动补发，但错峰更省事）" % (hh, hh, 5))
+    except Exception:
+        pass
+
+    # v1.0.16：日报统计区间 / 告警推送计划的说明性提示
+    try:
+        if M.hm_to_min(cfg.get("report_window_from"), 0) == \
+                M.hm_to_min(cfg.get("report_window_to"), 23 * 60 + 59):
+            warnings.append("日报统计区间起止相同（%s），会按整整 24 小时统计"
+                            % cfg.get("report_window_from"))
+        all_days = list(cfg.get("alert_push_weekdays") or []) == list(C.WEEKDAY_ALL)
+        if not (all_days and M.window_text(cfg.get("alert_window_from"),
+                                           cfg.get("alert_window_to")) == "全天"):
+            warnings.append("告警推送计划：%s —— 时段外只检测并写日志，不推送；"
+                            "进入时段后的第一轮扫描会立刻补发" % M.push_plan_text(cfg))
     except Exception:
         pass
     for ch in chans:
@@ -188,6 +202,10 @@ def status_payload():
         "last_check_str": M.fmt_ts(cfg, st.get("last_check") or 0),
         "next_scan_sec": next_scan_eta(),
         "next_daily_str": next_daily_str(cfg),
+        "report_plan": M.report_plan_text(cfg),
+        "push_plan": M.push_plan_text(cfg),
+        "push_allowed": M.alert_push_allowed(cfg),
+        "quiet_since": st.get("quiet_since") or 0,
         "last_report_day": st.get("last_report_day") or "",
         "warnings": warnings,
         "errors": errors,
@@ -203,8 +221,11 @@ def handle_action(body, query):
         return status_payload()
 
     if act == "scan":
+        # 页面上的「立即检测」= 人就在旁边看着，默认绕过推送计划强制发一次
+        force = body.get("force")
+        force_alert = True if force is None else bool(force)
         with SCAN_LOCK:
-            res = M.run_scan(get_cfg(), STATE, force_alert=bool(body.get("force")))
+            res = M.run_scan(get_cfg(), STATE, force_alert=force_alert)
         out = status_payload()
         out["scan"] = res["result"]
         out["events"] = [{"scope": e["scope"], "kind": e["kind"]} for e in res["events"]]

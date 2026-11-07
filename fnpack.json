@@ -19,7 +19,8 @@
       "icon_url": "https://cdn.jsdelivr.net/gh/st1341815/EasyNVR-RecordAlert@main/erm/app/ui/images/icon_256.png",
       "preview_urls": [
         "https://cdn.jsdelivr.net/gh/st1341815/EasyNVR-RecordAlert@main/docs/preview-1.png",
-        "https://cdn.jsdelivr.net/gh/st1341815/EasyNVR-RecordAlert@main/docs/preview-2-doctor.png"
+        "https://cdn.jsdelivr.net/gh/st1341815/EasyNVR-RecordAlert@main/docs/preview-2-doctor.png",
+        "https://cdn.jsdelivr.net/gh/st1341815/EasyNVR-RecordAlert@main/docs/preview-3-stats.png"
       ],
       "bug_report_url": "https://github.com/st1341815/EasyNVR-RecordAlert/issues",
       "maintainer": "uncle13",

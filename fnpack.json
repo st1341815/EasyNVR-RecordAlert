@@ -29,8 +29,19 @@
       "install_type": "",
       "is_docker": false,
       "service_port": "",
-      "details_updated_at": "2026-11-08T07:27:00+08:00",
+      "details_updated_at": "2026-11-08T07:37:00+08:00",
       "releases": {
+        "1.0.24": {
+          "changelog": "手机端顶栏恢复显示版本号。v1.0.19 把顶栏在手机上折成两行时，为腾地方把 .ver 在 @media (max-width:640px) 里设成 display:none，结果拿手机看页面无法确认加载的是哪一版。现改为 display:inline 并把字号从 11.5px 缩到 10.5px，与标题同行；配套给 .brand 打开 flex-wrap 并留 2px 行距——375px 宽度下标题 + 版本号约 190px、顶栏可用 254px，实测仍在同一行，只有 ≤320px 极窄屏才折行。只改断点内的规则，桌面端常显不受影响。",
+          "updated_at": "2026-11-08T07:37:00+08:00",
+          "packages": {
+            "all": {
+              "download_url": "https://github.com/st1341815/EasyNVR-RecordAlert/releases/download/v1.0.24/EasyNVR-RecordAlert-1.0.24.fpk",
+              "sha256": "6daa1243e0fec59bb905347a1a6b13e7a5d327dcf138765d30bb2272aacbdeb1",
+              "size": 84174
+            }
+          }
+        },
         "1.0.23": {
           "changelog": "概览页按配置页的卡片语言拆成三张卡，「通道对比」上移到「录像概览」卡片内紧跟 KPI 六格。卡一=录像概览（时间范围按钮 + 六格 KPI + 通道对比）；卡二=每日在线率 / 录像文件数 / 录像覆盖热力图；卡三=断流区间 + 口径说明。两处配套细节：① 卡内第一块 .subcard 去掉顶部虚线（虚线是卡内分区线，卡片本身已有边框），卡一的「通道对比」保留虚线作为与 KPI 的分隔；② 入场动画的 anim 类从 #statCard 改挂整页容器 #page-overview，否则拆卡后卡二里的柱状图与热力图拿不到 .anim 祖先、切区间时动画失效。",
           "updated_at": "2026-11-08T07:27:00+08:00",

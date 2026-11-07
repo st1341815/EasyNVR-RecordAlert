@@ -250,8 +250,11 @@ def mk_easynvr_tree(root):
     yday = (now - timedelta(days=1)).strftime("%Y%m%d")
     files = {}
     # 摄像头 A：两个 profile，主码流刚录过，子码流只在昨天录过（未持续录制）
+    # 「昨天」的锚点固定到昨天中午，不能写 now - timedelta(days=1, hours=2)：
+    # 那是减 26 小时，凌晨 0~2 点跑会落到前天，日报断言就假红（2026-11-08 01:52 实测复现）。
+    yday_noon = (now - timedelta(days=1)).replace(hour=12, minute=0, second=0, microsecond=0)
     for prof, when, n in (("profile_1", now - timedelta(seconds=90), 3),
-                          ("profile_2", now - timedelta(days=1, hours=2), 2)):
+                          ("profile_2", yday_noon, 2)):
         d = os.path.join(root, "O27fqV6dYvs3T", prof, when.strftime("%Y%m%d"))
         os.makedirs(d, exist_ok=True)
         for i in range(n):

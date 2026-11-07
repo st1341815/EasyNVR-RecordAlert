@@ -11,6 +11,56 @@
 - Release 附件：`EasyNVR-RecordAlert-<版本>.fpk`
 - 主题写正文首行 `## v<版本> · 主题`；仓库内构建产物固定 `dist/erm.fpk`
 
+## v1.0.22 · 热力图铺满宽度 + 字号对齐
+
+### 一、问题
+
+v1.0.21 把概览页收到 1080 之后，热力图这块暴露两个问题：
+
+1. **宽度只占卡片的三分之一。** `table.heat{width:auto}` 配 `td{width:15px;height:15px}`，
+   24 列算下来约 481px，在 1046px 的内容区里右边空一大片。
+2. **字号比页面其它表格小一号。** 热力图用 11px / 10.5px、图例 11.5px，
+   而普通表格是 13px / 12px，看着像从别的组件里粘过来的。
+
+### 二、改法
+
+```css
+/* 改前 */
+.legend      { font-size:11.5px }
+table.heat   { font-size:11px; width:auto }
+table.heat th{ font-size:10.5px }
+table.heat td{ width:15px; height:15px }
+
+/* 改后 */
+.legend      { font-size:12px }
+table.heat   { font-size:12.5px; width:100% }
+table.heat th{ font-size:12px }
+table.heat th.rowh{ width:1% }                    /* 行标题列让位给数据列 */
+table.heat td{ height:var(--heat-h,20px) }        /* 宽度交给浏览器均分 */
+```
+
+铺满之后 24 列会被拉得很宽，固定 20px 高就变成扁长条。所以单元格高度按行数调
+（`--heat-h` 由 `heatTable()` 写进 table 的 inline style）：
+
+| 行数 | 格高 | 典型场景 |
+| --- | --- | --- |
+| ≤ 6 | 30px | 单日视图，行是通道 |
+| ≤ 12 | 24px | 近 7 天，行是日期 |
+| > 12 | 18px | 近 30 天 |
+
+移动端（≤640px）显式复位 `table.heat{width:auto}` 与 `th.rowh{width:auto}`，
+保住原来「24 小时 × 7 天整屏放下、不用横向拖」的行为。
+
+### 三、实测（1440 视口，本地 UI）
+
+| 视图 | 行数 | 格子 宽×高 | 表格宽 | 溢出 |
+| --- | --- | --- | --- | --- |
+| 今天 | 3 | 115 × 30 | 1046 | 无 |
+| 近 7 天 | 7 | 40 × 24 | 1046 | 无 |
+| 近 30 天 | 30 | 40 × 19 | 1046 | 无 |
+
+改前表格固定 481px。1046 = 1080 − 两侧 padding，即完全铺满且无横向溢出。
+
 ## v1.0.21 · 概览页与配置页同宽
 
 ### 一、问题

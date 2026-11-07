@@ -203,16 +203,20 @@
   .xlabels span{flex:1 1 0;min-width:10px;text-align:center;font-size:10px;
                 color:var(--muted);white-space:nowrap;overflow:hidden}
   .xlabels span.blank{color:transparent}
-  .legend{display:flex;gap:14px;font-size:11.5px;color:var(--muted);margin-bottom:8px;
+  .legend{display:flex;gap:14px;font-size:12px;color:var(--muted);margin-bottom:8px;
           flex-wrap:wrap}
-  .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;
+  .legend i{display:inline-block;width:11px;height:11px;border-radius:2px;
             margin-right:4px;vertical-align:-1px}
   .heatwrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
-  table.heat{border-collapse:separate;border-spacing:2px;font-size:11px;width:auto}
-  table.heat th{font-size:10.5px;color:var(--muted);font-weight:600;padding:0 2px;
+  /* 热力图铺满卡片宽度：原来 width:auto + td 写死 15px，24 列算下来只有约 481px，
+     在 1080 的内容区里只占 1/3，右边空一大片。改成 table 100%、td 不给固定宽，
+     列宽由浏览器均分；行标题列 width:1% 让位给数据列。
+     字号也跟其它表格对齐（table 13 / th 12 / 这里 12.5 与 12），原来 11 / 10.5 偏小。 */
+  table.heat{border-collapse:separate;border-spacing:2px;font-size:12.5px;width:100%}
+  table.heat th{font-size:12px;color:var(--muted);font-weight:600;padding:0 2px;
                 text-align:center;white-space:nowrap;border:0;background:none}
-  table.heat th.rowh{text-align:right;padding-right:5px}
-  table.heat td{width:15px;height:15px;padding:0;border:0;border-radius:3px;
+  table.heat th.rowh{text-align:right;padding-right:6px;width:1%}
+  table.heat td{height:var(--heat-h,20px);padding:0;border:0;border-radius:3px;
                 background:var(--track)}
   .chrow{display:flex;align-items:center;gap:9px;padding:5px 0;font-size:13px}
   .chrow .nm{flex:0 0 104px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -295,9 +299,9 @@
     .chrow .nm{flex-basis:74px;font-size:12.5px}
     .chrow .val{font-size:11px}
     /* 热力图在手机上压格子，24 小时 × 7 天能整屏放下，不用横向拖 */
-    table.heat{border-spacing:1px;font-size:9px}
+    table.heat{border-spacing:1px;font-size:9px;width:auto}
     table.heat th{font-size:8.5px;padding:0 1px}
-    table.heat th.rowh{padding-right:3px;max-width:44px;overflow:hidden}
+    table.heat th.rowh{padding-right:3px;max-width:44px;overflow:hidden;width:auto}
     table.heat td{width:9px;height:9px;border-radius:2px}
     /* 顶栏在手机上从 grid 切回 flex，才能 wrap 成两行 */
     .bar-inner{display:flex;flex-wrap:wrap}
@@ -1006,11 +1010,15 @@ function heatTable(heat){
   const cols = (heat && heat.cols) || [];
   const cells = (heat && heat.cells) || [];
   if (!rows.length) return '<div class="empty">没有数据</div>';
+  // 表格现在铺满卡片宽度，格子会被拉得很宽；行少的时候（单日视图只有几个通道）
+  // 固定 20px 高会变成扁长条，所以按行数调高度：行越多越矮，保证整块别太长。
+  const rowH = rows.length <= 6 ? 30 : (rows.length <= 12 ? 24 : 18);
   let h = '<div class="legend"><span>' +
           '<i style="background:var(--heat-0)"></i>无录像</span><span>' +
           '<i style="background:var(--heat-2)"></i>一半</span><span>' +
           '<i style="background:var(--heat-5)"></i>整小时</span></div>' +
-          '<div class="heatwrap"><table class="heat"><thead><tr><th class="rowh"></th>';
+          '<div class="heatwrap"><table class="heat" style="--heat-h:' + rowH + 'px">' +
+          '<thead><tr><th class="rowh"></th>';
   for (const c of cols) h += '<th>' + esc(c) + '</th>';
   h += '</tr></thead><tbody>';
   rows.forEach((r, ri) => {

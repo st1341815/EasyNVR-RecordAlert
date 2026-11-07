@@ -644,6 +644,110 @@ def test_normalize_keeps_secret():
     eq(C.load_config()["dingtalk_webhook"], "https://a/b", "未提供的键保留默认/原值")
 
 
+def test_stats():
+    """v1.0.18：统计页的区间/在线时长/数量口径。
+
+    统计不落采样库，全靠录像 mtime 反推，所以每个数字都必须能对上手工核算的秒数——
+    口径一旦算错，页面上的「在线率」就是假的，比没有更糟。
+    """
+    import stats as S
+
+    print("-- 统计")
+    # ① 段口径：把 mtime 切成「连续录像段」，段尾补一个片段时长
+    b = 1_700_000_000
+    segs = S.segments([b + 60 * i for i in range(10)])
+    eq(len(segs), 1, "统计：10 个 1 分钟切片合成 1 段")
+    eq(segs[0][1] - segs[0][0], 600, "统计：段时长 = 跨度 9 分钟 + 1 个片段 = 10 分钟")
+    segs = S.segments([b])
+    eq(segs[0][1] - segs[0][0], 60, "统计：孤立单文件算 1 个片段（不是 0）")
+    segs = S.segments([b, b + 60, b + 4000])
+    eq(len(segs), 2, "统计：间隔超过 5 分钟切成两段")
+    eq(segs[0][1] - b, 120, "统计：两段 1 分钟录像 = 120 秒，不把断流时间算进在线")
+
+    # ② 时间窗口（时区对齐是整小时，所以直接对 3600 取模）
+    cfg0 = C.normalize({"timezone": "Asia/Shanghai"})
+    now = M.now_dt(cfg0)
+    for key, ndays, single in (("today", 1, True), ("yesterday", 1, True),
+                               ("7d", 7, False), ("30d", 30, False)):
+        w = S.window_of(cfg0, key, now=now)
+        eq(len(w["day_labels"]), ndays, "统计窗口 %s 覆盖天数" % key)
+        eq(w["single_day"], single, "统计窗口 %s 单日标记" % key)
+        ok(w["end"] > w["start"], "统计窗口 %s 起止有序" % key)
+    eq(S.window_of(cfg0, "7d", now=now)["start"] % 3600, 0, "统计窗口起点对齐整点")
+    eq(S.window_of(cfg0, "bogus", now=now)["key"], "7d", "非法 range 回落近 7 天")
+
+    # ③ 真实目录树上的聚合：0–2 点连录 → 断 1 小时 → 3–4 点再录
+    root = tempfile.mkdtemp(prefix="erm-stats-")
+    try:
+        base_day = (now - timedelta(days=3)).replace(
+            hour=0, minute=0, second=0, microsecond=0)
+        ts0 = int(base_day.timestamp())
+        cam = "STATCAM00001"
+        dd = os.path.join(root, cam, "profile_1", base_day.strftime("%Y%m%d"))
+        os.makedirs(dd)
+        marks = ([ts0 + 60 * i for i in range(120)] +
+                 [ts0 + 3600 * 3 + 60 * i for i in range(60)])
+        for t in marks:
+            fp = os.path.join(dd, "%d.mp4" % t)
+            with open(fp, "wb") as f:
+                f.write(b"\0")
+            os.utime(fp, (t, t))
+
+        S.clear_cache()
+        cfg = C.normalize({"record_root": root, "timezone": "Asia/Shanghai"})
+        r = S.build(cfg, "7d", now=now)
+        eq(len(r["channels"]), 1, "统计：识别到 1 个通道")
+        ch = r["channels"][0]
+        eq(ch["files"], 180, "统计：窗口内文件数")
+        eq(ch["online_sec"], 10800, "统计：在线时长 = 2 小时 + 1 小时")
+        eq(ch["online_pct"], round(100.0 * 10800 / (r["span_sec"] or 1), 1),
+           "统计：通道在线率 = 在线 / 窗口")
+        eq(r["summary"]["files"], 180, "统计：汇总文件数")
+        eq(r["summary"]["online_sec"], 10800, "统计：单通道时汇总 = 该通道（不是它的 2 倍）")
+        eq(len(r["bars"]), 7, "统计：7 天视图 7 根柱")
+        eq(r["heat"]["kind"], "day", "统计：多日视图热力图按天")
+        eq(len(r["heat"]["rows"]), 7, "统计：热力图 7 行")
+        eq(len(r["heat"]["cols"]), 24, "统计：热力图 24 列")
+        eq(sum(b["files"] for b in r["bars"]), 180, "统计：柱状图文件数与总数一致")
+        eq(sum(b["files"] for b in r["bars"]), 180, "统计：柱状图文件数按同一套桶归集")
+
+        # 断流：最后一个文件是 1:59、下一个是 3:00 → 61 分钟（按文件到文件算，不补片段）
+        one_hour = [g for g in r["gaps"] if g["minutes"] == 61]
+        eq(len(one_hour), 1, "统计：识别出那段 1 小时断流（61 分钟）")
+        eq(one_hour[0]["from"], ts0 + 60 * 119, "统计：断流起点 = 段尾最后一个文件")
+        eq(one_hour[0]["to"], ts0 + 3600 * 3, "统计：断流终点 = 下一段第一个文件")
+        ok("小时" in one_hour[0]["dur_str"], "统计：断流时长带可读文案",
+           one_hour[0]["dur_str"])
+        eq(r["gap_total"], len(r["gaps"]), "统计：gap_total 与实际条数一致（未截断时）")
+
+        # 单日视图：把"现在"挪到当天 12:00
+        r2 = S.build(cfg, "today", now=base_day.replace(hour=12))
+        eq(r2["single_day"], True, "统计：today 是单日视图")
+        eq(len(r2["bars"]), 12, "统计：12:00 时单日视图 12 个小时柱（00–11 点）")
+        eq(r2["heat"]["kind"], "channel", "统计：单日视图热力图按通道")
+        eq(len(r2["heat"]["rows"]), 1, "统计：单日视图热力图行数 = 通道数")
+        eq(r2["channels"][0]["online_sec"], 10800, "统计：单日视图在线时长一致")
+
+        # 别名生效
+        cfg_alias = C.normalize({"record_root": root,
+                                 "channel_aliases": {cam: "测试通道"}})
+        r3 = S.build(cfg_alias, "7d", now=now)
+        eq(r3["channels"][0]["label"], "测试通道", "统计：通道显示别名")
+
+        # 缓存命中后结果必须一致（缓存 key 漏了参数就会串数据）
+        r4 = S.build(cfg, "7d", now=now)
+        eq(r4["summary"]["files"], 180, "统计：走缓存后结果一致")
+
+        # ④ 错误路径
+        r5 = S.build(C.normalize({"record_root": os.path.join(root, "nope")}), "7d")
+        ok(r5["error"], "统计：目录不存在时给出 error")
+        r6 = S.build(C.normalize({}), "7d")
+        ok(r6["error"], "统计：未配置录像目录时给出 error")
+        eq(r6["channels"], [], "统计：无数据时通道列表为空（前端据此显示 —）")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def test_rate_limit_retry(webhook):
     """v1.0.14：飞书 11232/11233 限流要退避重试，且只对限流重试。
 
@@ -835,7 +939,7 @@ def main():
         for fn in (test_config_types, test_config_io, test_channels_and_evaluate,
                    test_easynvr_layout, test_online_streak,
                    test_scan_alert_and_silence, test_daily_schedule, test_report_text,
-                   test_push_plan_and_report_window,
+                   test_push_plan_and_report_window, test_stats,
                    test_normalize_keeps_secret):
             fn()
         test_push(webhook)

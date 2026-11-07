@@ -87,6 +87,56 @@
       font-size:12px;line-height:1.5;max-height:340px;margin:0}
   details summary{cursor:pointer;font-size:13px;color:var(--muted);font-weight:600}
   .flex-between{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+  /* ---------- 统计页（v1.0.18） ---------- */
+  button.mini.active{background:var(--brand);border-color:var(--brand);color:#fff}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));
+        gap:9px;margin:14px 0 2px}
+  .kpi{border:1px solid var(--line);border-radius:9px;padding:9px 11px;background:#fff}
+  .kpi .k{display:block;font-size:11.5px;color:var(--muted);white-space:nowrap}
+  .kpi b{display:block;font-size:16px;font-weight:650;margin-top:2px;
+         font-variant-numeric:tabular-nums;white-space:nowrap}
+  .kpi b em{font-style:normal;font-size:11.5px;color:var(--muted);font-weight:500}
+  .chart{overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px}
+  /* 每根柱在自己的槽里居中：7 天时柱宽 44px 均匀散开，30 天时自动收窄 */
+  .cols{display:flex;align-items:flex-end;gap:4px;height:92px;min-width:100%}
+  .col{flex:1 1 0;min-width:10px;height:100%;display:flex;align-items:flex-end;
+       justify-content:center}
+  .bar{width:78%;max-width:44px;height:100%;background:#eeeae1;border-radius:4px 4px 2px 2px;
+       display:flex;align-items:flex-end;overflow:hidden}
+  .bar i{display:block;width:100%;background:var(--brand);border-radius:2px}
+  .bar.empty{background:#f7f5f0}
+  .xlabels{display:flex;gap:4px;margin-top:5px;min-width:100%}
+  .xlabels span{flex:1 1 0;min-width:10px;text-align:center;font-size:10px;
+                color:var(--muted);white-space:nowrap;overflow:hidden}
+  .xlabels span.blank{color:transparent}
+  .legend{display:flex;gap:14px;font-size:11.5px;color:var(--muted);margin-bottom:8px;
+          flex-wrap:wrap}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;
+            margin-right:4px;vertical-align:-1px}
+  .heatwrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table.heat{border-collapse:separate;border-spacing:2px;font-size:11px;width:auto}
+  table.heat th{font-size:10.5px;color:var(--muted);font-weight:600;padding:0 2px;
+                text-align:center;white-space:nowrap;border:0;background:none}
+  table.heat th.rowh{text-align:right;padding-right:5px}
+  table.heat td{width:15px;height:15px;padding:0;border:0;border-radius:3px;
+                background:#efece4}
+  .chrow{display:flex;align-items:center;gap:9px;padding:5px 0;font-size:13px}
+  .chrow .nm{flex:0 0 104px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .chrow .track{flex:1 1 auto;height:12px;background:#eeeae1;border-radius:999px;
+                overflow:hidden;min-width:56px}
+  .chrow .track i{display:block;height:100%;background:var(--brand);border-radius:999px}
+  .chrow .track i.warn{background:#c58a2b}
+  .chrow .track i.bad{background:#b4553f}
+  .chrow .val{flex:0 0 auto;font-size:12px;color:var(--muted);
+              font-variant-numeric:tabular-nums;white-space:nowrap}
+  .gaprow{display:flex;gap:10px;align-items:baseline;padding:5px 0;font-size:12.5px;
+          border-bottom:1px solid #f4f1ea;flex-wrap:wrap}
+  .gaprow:last-child{border-bottom:0}
+  .gaprow .gname{flex:0 0 auto;font-weight:600;white-space:nowrap}
+  .gaprow .gtime{flex:1 1 auto;color:var(--muted);font-variant-numeric:tabular-nums}
+  .gaprow .gmin{flex:0 0 auto;color:var(--danger);font-variant-numeric:tabular-nums;
+                white-space:nowrap}
+
   /* ---------- 手机端（≤640px） ---------- */
   @media (max-width: 640px) {
     .wrap{padding:14px 12px 40px}
@@ -119,6 +169,12 @@
     .meta{gap:10px 16px;font-size:12px}
     .meta b{display:inline}
     pre{font-size:11.5px}
+    /* 统计：KPI 两列，柱子矮一点，通道名收窄 */
+    .kpis{grid-template-columns:repeat(2,1fr);gap:8px}
+    .kpi b{font-size:15px}
+    .cols{height:74px}
+    .chrow .nm{flex-basis:74px;font-size:12.5px}
+    .chrow .val{font-size:11px}
   }
 
 </style>
@@ -158,6 +214,50 @@
       · 在线时长 = 从最新录像往回、相邻文件间隔不超过 <b>5 分钟</b> 的连续录像时长；
       超过 100 小时转成「天/时」，超过 100 天转成「月/天/时」（最长约保留 180 天）。
       通道断流 / 无录像时显示 <code>—</code>。
+    </div>
+  </div>
+
+  <div class="card" id="statCard">
+    <div class="flex-between">
+      <h2 style="margin:0">统计</h2>
+      <div class="row" id="statRange">
+        <button type="button" class="mini" data-range="today">今天</button>
+        <button type="button" class="mini" data-range="yesterday">昨天</button>
+        <button type="button" class="mini active" data-range="7d">近 7 天</button>
+        <button type="button" class="mini" data-range="30d">近 30 天</button>
+      </div>
+    </div>
+    <div class="hint" id="statSpan">加载中…</div>
+    <div class="kpis" id="statKpis"></div>
+
+    <div class="subcard">
+      <h3 id="statPctTitle">在线率</h3>
+      <div id="statPct"></div>
+    </div>
+    <div class="subcard">
+      <h3>录像文件数</h3>
+      <div id="statCount"></div>
+    </div>
+    <div class="subcard">
+      <h3>录像覆盖热力图</h3>
+      <div id="statHeat"></div>
+    </div>
+    <div class="subcard">
+      <h3>通道对比</h3>
+      <div id="statChans"></div>
+    </div>
+    <div class="subcard">
+      <h3>断流区间</h3>
+      <div id="statGaps"></div>
+    </div>
+
+    <div class="notes">
+      · <b>不需要额外采集</b>：每个录像文件的修改时间就是「那一刻在录」的证据，统计直接从磁盘反推，
+      所以升级完马上能看到历史，也不新增数据库、不占空间。<br>
+      · <b>在线</b> = 相邻录像间隔不超过 5 分钟（与状态页「在线时长」同一口径）；<b>闲置</b> = 窗口时长 − 在线时长。<br>
+      · 热力图是<b>每格在该小时内的录像覆盖比例</b>：100% = 整小时都在录，空白 = 那一小时没录像。
+      单日视图的行是通道，多日视图的行是日期。<br>
+      · 汇总一律取<b>每通道平均</b>——否则 10 个通道的「每日在线」会被叠加成 240 小时。
     </div>
   </div>
 
@@ -385,6 +485,8 @@
 
 <script>
 const API = '/app/erm/api';
+/* 15 秒自动刷新会把用户正在编辑的配置冲掉 —— 编辑过就不再回填，保存成功后复位 */
+let cfgDirty = false;
 const $ = id => document.getElementById(id);
 
 async function call(action, extra) {
@@ -440,6 +542,9 @@ function renderChannels(d){
   }
   box.innerHTML = html + '</tbody></table>';
 }
+
+$('cfgForm').addEventListener('input', () => { cfgDirty = true; });
+$('cfgForm').addEventListener('change', () => { cfgDirty = true; });
 
 const PUSH_CH = ['dingtalk', 'feishu', 'wechat', 'email'];
 
@@ -548,7 +653,7 @@ function render(d){
   $('mLayout').textContent = (LAY[d.layout] || d.layout || '—') + '·' + (d.channel_count || 0) + ' 个通道';
   $('rootErr').textContent = d.error ? ('⚠ ' + d.error) : '';
   renderChannels(d);
-  if (d.config) fillConfig(d.config);
+  if (d.config && !cfgDirty) fillConfig(d.config);
 }
 
 async function load(){
@@ -637,6 +742,7 @@ $('btnSave').onclick = async () => {
   const btn = $('btnSave'); btn.disabled = true;
   try {
     const d = await call('save_config', {config: cfg});
+    cfgDirty = false;
     render(d);
     const w = (d.warnings || []);
     showMsg($('saveMsg'), '已保存。' + (w.length ? '\n注意：\n· ' + w.join('\n· ') : ''), w.length ? 'warn' : 'ok');
@@ -673,8 +779,161 @@ $('btnDoctor').onclick = async () => {
   } finally { btn.disabled = false; }
 };
 
+/* ══════════════════ 统计（v1.0.18） ══════════════════ */
+
+let statRange = '7d';
+const STAT_EMPTY = '<div class="empty">—</div>';
+
+function kpi(k, v, unit){
+  return '<div class="kpi"><span class="k">' + esc(k) + '</span><b>' + esc(v) +
+         (unit ? ' <em>' + esc(unit) + '</em>' : '') + '</b></div>';
+}
+
+function clampPct(x){ return Math.max(0, Math.min(100, Number(x) || 0)); }
+
+/* 柱状图：pct = 在线率（0-100 堆叠），count = 录像文件数（自适应高度）。
+   两张图的 flex 规则完全一致 → 横轴天然对齐。 */
+function barChart(bars, mode){
+  if (!bars || !bars.length) return '<div class="empty">没有数据</div>';
+  const n = bars.length;
+  const skip = Math.max(1, Math.ceil(n / 12));       // 标签抽稀，避免挤成一团
+  let maxFiles = 1;
+  for (const b of bars) maxFiles = Math.max(maxFiles, b.files || 0);
+  let cols = '', xl = '';
+  bars.forEach((b, i) => {
+    const p = clampPct(b.online_pct);
+    const tip = b.label + '：在线率 ' + p.toFixed(1) + '%，' + (b.files || 0) + ' 个文件';
+    if (mode === 'pct') {
+      cols += '<div class="col" title="' + esc(tip) + '"><div class="bar">' +
+              '<i style="height:' + p.toFixed(1) + '%"></i></div></div>';
+    } else {
+      const h = (b.files || 0) / maxFiles * 100;
+      cols += '<div class="col" title="' + esc(tip) + '"><div class="bar' +
+              ((b.files || 0) ? '' : ' empty') + '">' +
+              '<i style="height:' + h.toFixed(1) + '%;background:#8fb3a3"></i></div></div>';
+    }
+    const show = (i % skip === 0) || i === n - 1;
+    xl += '<span class="' + (show ? '' : 'blank') + '">' + esc(b.label) + '</span>';
+  });
+  return '<div class="chart"><div class="cols">' + cols + '</div>' +
+         '<div class="xlabels">' + xl + '</div></div>';
+}
+
+/* 热力图色阶：0 → 浅灰，1 → 品牌绿。null 表示"还没走到的小时"，留空。 */
+function heatBg(v){
+  if (v === null || v === undefined) return 'transparent';
+  if (v <= 0.001) return '#f2efe8';
+  if (v < 0.2) return '#dfe8e2';
+  if (v < 0.4) return '#c2d8cc';
+  if (v < 0.6) return '#9dc4b2';
+  if (v < 0.8) return '#6fa48f';
+  return '#3f6f5f';
+}
+
+function heatTable(heat){
+  const rows = (heat && heat.rows) || [];
+  const cols = (heat && heat.cols) || [];
+  const cells = (heat && heat.cells) || [];
+  if (!rows.length) return '<div class="empty">没有数据</div>';
+  let h = '<div class="legend"><span>' +
+          '<i style="background:#f2efe8"></i>无录像</span><span>' +
+          '<i style="background:#c2d8cc"></i>一半</span><span>' +
+          '<i style="background:#3f6f5f"></i>整小时</span></div>' +
+          '<div class="heatwrap"><table class="heat"><thead><tr><th class="rowh"></th>';
+  for (const c of cols) h += '<th>' + esc(c) + '</th>';
+  h += '</tr></thead><tbody>';
+  rows.forEach((r, ri) => {
+    h += '<tr><th class="rowh">' + esc(r) + '</th>';
+    (cells[ri] || []).forEach((v, ci) => {
+      const tip = r + ' ' + (cols[ci] || '') +
+                  (v == null ? '：无数据' : '：' + (v * 100).toFixed(0) + '% 在录');
+      h += '<td style="background:' + heatBg(v) + '" title="' + esc(tip) + '"></td>';
+    });
+    h += '</tr>';
+  });
+  return h + '</tbody></table></div>';
+}
+
+function chanBars(list){
+  if (!list.length) return '<div class="empty">没有数据</div>';
+  return list.map(c => {
+    const p = clampPct(c.online_pct);
+    const cls = p >= 95 ? '' : (p >= 70 ? ' warn' : ' bad');
+    return '<div class="chrow"><span class="nm" title="' + esc(c.channel) + '">' +
+           esc(c.label) + '</span><span class="track"><i class="' + cls +
+           '" style="width:' + p.toFixed(1) + '%"></i></span>' +
+           '<span class="val">' + p.toFixed(1) + '% · ' + esc(c.online_str) +
+           ' · ' + (c.files || 0) + ' 个</span></div>';
+  }).join('');
+}
+
+function gapList(d){
+  const gs = d.gaps || [];
+  if (!gs.length) {
+    return '<div class="empty">窗口内没有断流：相邻录像的间隔都没超过 5 分钟</div>';
+  }
+  let h = gs.map(g =>
+    '<div class="gaprow"><span class="gname">' + esc(g.label) + '</span>' +
+    '<span class="gtime">' + esc(g.from_str) + ' → ' + esc(g.to_str) + '</span>' +
+    '<span class="gmin">' + esc(g.dur_str) + '</span></div>').join('');
+  if ((d.gap_total || 0) > gs.length) {
+    h += '<div class="hint">共 ' + d.gap_total + ' 段，这里只列最近 ' + gs.length + ' 段' +
+         '（换更小的范围可以看全）</div>';
+  }
+  return h;
+}
+
+function renderStats(d){
+  const s = d.summary || {};
+  $('statSpan').textContent = d.error ? ('⚠ ' + d.error) :
+    (d.range_label + '：' + String(d.start_str || '').slice(5, 16) + ' → ' +
+     String(d.end_str || '').slice(5, 16) + '（' + d.bucket_count + ' 个小时 × ' +
+     (s.channels || 0) + ' 个通道）');
+
+  if (d.error && !(d.channels || []).length) {
+    $('statKpis').innerHTML = '';
+    ['statPct', 'statCount', 'statHeat', 'statChans', 'statGaps']
+      .forEach(id => { $(id).innerHTML = STAT_EMPTY; });
+    return;
+  }
+
+  $('statKpis').innerHTML =
+    kpi('在线时长', s.online_str || '—', '每通道') +
+    kpi('闲置时长', s.idle_str || '—', '每通道') +
+    kpi('在线率', (s.online_pct || 0).toFixed(1), '%') +
+    kpi('录像文件', s.files || 0, '个') +
+    kpi('最长连续', s.longest_str || '—', '') +
+    kpi('最长断流', s.longest_gap_str || '无', '');
+
+  $('statPctTitle').textContent = d.single_day ? '每小时在线率' : '每日在线率';
+  $('statPct').innerHTML =
+    '<div class="legend"><span><i style="background:var(--brand)"></i>在线</span>' +
+    '<span><i style="background:#eeeae1"></i>闲置</span></div>' +
+    barChart(d.bars, 'pct');
+  $('statCount').innerHTML = barChart(d.bars, 'count');
+  $('statHeat').innerHTML = heatTable(d.heat);
+  $('statChans').innerHTML = chanBars(d.channels || []);
+  $('statGaps').innerHTML = gapList(d);
+}
+
+async function loadStats(){
+  document.querySelectorAll('#statRange button').forEach(b => {
+    b.classList.toggle('active', b.dataset.range === statRange);
+  });
+  try {
+    renderStats(await call('stats', {range: statRange}));
+  } catch (e) {
+    $('statSpan').textContent = '⚠ 统计加载失败：' + e.message;
+  }
+}
+
+document.querySelectorAll('#statRange button').forEach(btn => {
+  btn.addEventListener('click', () => { statRange = btn.dataset.range; loadStats(); });
+});
+
 load();
-setInterval(load, 15000);
+loadStats();
+setInterval(() => { load(); loadStats(); }, 15000);
 </script>
 </body>
 </html>

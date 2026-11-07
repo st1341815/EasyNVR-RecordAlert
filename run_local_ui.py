@@ -42,17 +42,56 @@ def mk(path, when, n=1):
 
 
 def seed():
+    """造一棵「能看出统计差异」的 EasyNVR 树（近 10 天）：
+
+      大门 O27fqV6dYvs3T  → 全天连录，但第 3 天 02:00–06:00 断流、第 6 天整天没录
+      后院 Ou5Rv3hRv7gaU  → 每天只录 06:00–22:00
+      车库 De45adQ0Mn7U   → 只有最近 5 天有录像，之前一直空着
+
+    5 分钟一个文件（小于 300 秒的断流阈值 → 算作连续录像）。
+    """
     now = datetime.now()
-    d1 = now.strftime("%Y%m%d")
-    d0 = (now - timedelta(days=1)).strftime("%Y%m%d")
-    for cam, prof in (("O27fqV6dYvs3T", "profile_1"), ("Ou5Rv3hRv7gaU", "profile_1")):
-        mk(os.path.join(REC, cam, prof, d1), now - timedelta(seconds=45), 6)
-        mk(os.path.join(REC, cam, prof, d0), now - timedelta(days=1, hours=2), 40)
-        ev = os.path.join(REC, cam, prof, d1 + "_event")
-        os.makedirs(ev, exist_ok=True)
-        for i in range(3):
-            open(os.path.join(ev, "20261029%06d_%d.jpg" % (i, i)), "wb").write(b"\0" * 8)
-    os.makedirs(os.path.join(REC, "De45adQ0Mn7U", "profile_1", d1), exist_ok=True)
+    step = timedelta(minutes=5)
+
+    def fill(cam, day, h_from=0, h_to=24):
+        d = day.replace(hour=0, minute=0, second=0, microsecond=0)
+        path = os.path.join(REC, cam, "profile_1", d.strftime("%Y%m%d"))
+        os.makedirs(path, exist_ok=True)
+        t = d + timedelta(hours=h_from)
+        end = d + timedelta(hours=h_to)
+        n = 0
+        while t < end and t < now:
+            fp = os.path.join(path, t.strftime("%Y%m%d%H%M%S") + "-30000.mp4")
+            with open(fp, "wb") as f:
+                f.write(b"\0" * 16)
+            ts = t.timestamp()
+            os.utime(fp, (ts, ts))
+            t += step
+            n += 1
+        return n
+
+    for i in range(9, -1, -1):                       # 9 天前 → 今天
+        day = now - timedelta(days=i)
+        # 大门：全天，两处故障
+        if i != 6:
+            if i == 3:
+                fill("O27fqV6dYvs3T", day, 0, 2)
+                fill("O27fqV6dYvs3T", day, 6, 24)
+            else:
+                fill("O27fqV6dYvs3T", day, 0, 24)
+        # 后院：每天 06:00–22:00
+        fill("Ou5Rv3hRv7gaU", day, 6, 22)
+        # 车库：只有最近 5 天
+        if i <= 4:
+            fill("De45adQ0Mn7U", day, 0, 24)
+
+    # 事件抓拍目录（jpg 不该被当成录像）
+    ev = os.path.join(REC, "O27fqV6dYvs3T", "profile_1",
+                      now.strftime("%Y%m%d") + "_event")
+    os.makedirs(ev, exist_ok=True)
+    for i in range(3):
+        open(os.path.join(ev, "%s%06d_%d.jpg"
+                          % (now.strftime("%Y%m%d"), i, i)), "wb").write(b"\0" * 8)
 
 
 class Proxy(BaseHTTPRequestHandler):

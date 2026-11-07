@@ -30,7 +30,7 @@ from urllib.parse import parse_qs, urlparse
 
 APP_NAME = "erm"
 GATEWAY_PREFIX = "/app/" + APP_NAME
-VERSION = "1.0.17"
+VERSION = "1.0.18"
 
 SELF = os.path.abspath(__file__)
 APP_DEST = os.path.dirname(SELF)           # app/ 的内容直接铺到 target 根
@@ -41,6 +41,7 @@ sys.path.insert(0, APP_DEST)
 import config as C          # noqa: E402
 import monitor as M         # noqa: E402
 import notify as N          # noqa: E402
+import stats as S           # noqa: E402
 
 LOCK = threading.RLock()          # 保护 CFG / STATE 的读写
 SCAN_LOCK = threading.Lock()      # 保证同一时刻只有一次扫描在改 STATE
@@ -278,6 +279,13 @@ def handle_action(body, query):
             STATE["last_report_day"] = ""
             C.save_state(STATE)
         return {"ok": True, "msg": "运行状态已清空（下次扫描按「首次发现」处理）"}
+
+    if act == "stats":
+        rng = (body.get("range") or (query.get("range", [""])[0])
+               or S.DEFAULT_RANGE)
+        out = S.build(get_cfg(), rng)
+        out["ok"] = True
+        return out
 
     if act == "logs":
         n = int(body.get("lines") or query.get("lines", ["120"])[0] or 120)

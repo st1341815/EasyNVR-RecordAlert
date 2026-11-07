@@ -29,8 +29,19 @@
       "install_type": "",
       "is_docker": false,
       "service_port": "",
-      "details_updated_at": "2026-11-08T07:18:00+08:00",
+      "details_updated_at": "2026-11-08T07:27:00+08:00",
       "releases": {
+        "1.0.23": {
+          "changelog": "概览页按配置页的卡片语言拆成三张卡，「通道对比」上移到「录像概览」卡片内紧跟 KPI 六格。卡一=录像概览（时间范围按钮 + 六格 KPI + 通道对比）；卡二=每日在线率 / 录像文件数 / 录像覆盖热力图；卡三=断流区间 + 口径说明。两处配套细节：① 卡内第一块 .subcard 去掉顶部虚线（虚线是卡内分区线，卡片本身已有边框），卡一的「通道对比」保留虚线作为与 KPI 的分隔；② 入场动画的 anim 类从 #statCard 改挂整页容器 #page-overview，否则拆卡后卡二里的柱状图与热力图拿不到 .anim 祖先、切区间时动画失效。",
+          "updated_at": "2026-11-08T07:27:00+08:00",
+          "packages": {
+            "all": {
+              "download_url": "https://github.com/st1341815/EasyNVR-RecordAlert/releases/download/v1.0.23/EasyNVR-RecordAlert-1.0.23.fpk",
+              "sha256": "3febe30c1b5e7483436e0e706bd5eb1a6b10b7de395a9c463762b13b830d79e8",
+              "size": 84088
+            }
+          }
+        },
         "1.0.22": {
           "changelog": "热力图铺满卡片宽度并统一字号。① 宽度：原来 table.heat 用 width:auto + td 写死 15px，24 列只有约 481px，在 1046px 的内容区里只占三分之一，右边空一大片；现改为 table 100%、td 不给固定宽由浏览器均分，行标题列 width:1% 让位，实测 1046px 完全铺满且无横向溢出。② 字号：原来热力图 11px / 表头 10.5px / 图例 11.5px，比普通表格（13 / 12px）小一号，看着像另一个组件；现统一到 12.5 / 12 / 12px。③ 铺满后 24 列被拉宽，固定 20px 高会变成扁长条，故单元格高度按行数自适应：≤6 行 30px（单日，行是通道）、≤12 行 24px（近 7 天）、更多 18px（近 30 天）。④ 移动端显式复位 width:auto，保住原来「24 小时 × 7 天整屏放下不用横向拖」的行为。",
           "updated_at": "2026-11-08T07:18:00+08:00",

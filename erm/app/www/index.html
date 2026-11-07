@@ -156,6 +156,9 @@
               font-size:13px;white-space:nowrap;flex:0 0 auto}
   /* 卡片内的子分区（v1.0.16：日报 / 告警推送计划） */
   .subcard{border-top:1px dashed var(--line);margin-top:14px;padding-top:12px}
+  /* 概览页拆成多张卡片后，每张卡里的第一块 subcard 顶上不该再来一条虚线
+     （虚线是卡片内的分区线，卡片本身已经有边框了） */
+  #page-overview .card > .subcard:first-child{border-top:0;margin-top:0;padding-top:0}
   .subcard h3{font-size:13px;font-weight:650;margin:0 0 10px;color:var(--ink)}
   /* v1.0.17：时间框收窄，推送日「一~日」强制单行不折 */
   .g-narrow input[type=time]{max-width:9em}
@@ -368,6 +371,13 @@
     <div class="kpis" id="statKpis"></div>
 
     <div class="subcard">
+      <h3>通道对比</h3>
+      <div id="statChans"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="subcard">
       <h3 id="statPctTitle">在线率</h3>
       <div id="statPct"></div>
     </div>
@@ -379,10 +389,9 @@
       <h3>录像覆盖热力图</h3>
       <div id="statHeat"></div>
     </div>
-    <div class="subcard">
-      <h3>通道对比</h3>
-      <div id="statChans"></div>
-    </div>
+  </div>
+
+  <div class="card">
     <div class="subcard">
       <h3>断流区间</h3>
       <div id="statGaps"></div>
@@ -1096,8 +1105,10 @@ function renderStats(d){
 }
 
 /* 数据入场动画：切页 / 切区间才播，15 秒轮询不重播 */
+/* v1.0.23：概览拆成三张卡后，anim 类挂到整页容器上——挂单张卡的话
+   卡片 2 里的柱状图和热力图拿不到 .anim 祖先，入场动画会失效。 */
 function playAnim(){
-  const card = $('statCard');
+  const card = document.getElementById('page-overview');
   if (!card) return;
   card.classList.remove('anim');
   void card.offsetWidth;              // 强制重排，让动画从头播

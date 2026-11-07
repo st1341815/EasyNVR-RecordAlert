@@ -4,24 +4,117 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EasyNVR 录像监控</title>
+<script>
+/* 首帧之前就把主题定下来，避免深色偏好的用户先看到一片白闪 */
+(function(){
+  try{
+    var t = localStorage.getItem('erm.theme');
+    if (!t) t = (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches)
+                 ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){ document.documentElement.setAttribute('data-theme', 'light'); }
+})();
+</script>
 <style>
+  /* ═══════════ 主题变量（v1.0.19：亮/暗双主题） ═══════════ */
   :root{
     --bg:#f6f4ef; --card:#fffdf9; --ink:#23262b; --muted:#6b7280;
     --line:#e3ded4; --brand:#3f6f5f; --brand-soft:#e9f0ec;
     --warn:#8a5a00; --warn-bg:#fdf3dd; --danger:#a33a2e; --danger-bg:#fbebe8;
     --ok:#2f6b46; --ok-bg:#e8f2eb; --radius:10px;
+    /* 新增：可切换的表面/线条/色阶 */
+    --surface:#ffffff; --surface-2:#f7f5f0; --hover:#f3f0e9;
+    --line-soft:#f0ece3; --line-soft2:#f4f1ea; --track:#eeeae1;
+    --ok-line:#cfe2d6; --warn-line:#eeddb4; --danger-line:#efd2cd;
+    --bar2:#8fb3a3;
+    --heat-0:#f2efe8; --heat-1:#dfe8e2; --heat-2:#c2d8cc;
+    --heat-3:#9dc4b2; --heat-4:#6fa48f; --heat-5:#3f6f5f;
+    --pre-bg:#26292e; --pre-ink:#e6e3dc;
+    --topbar:#fffdf9e6; --shadow:0 1px 2px #23262b12;
+    --dot-idle:#c9c3b6; --ind-bg:#ffffff;
+    /* 版面宽度：原来写死 960px 居中，在 1440 屏上两侧各空 232px，像内容没铺开。
+       改成变量后 wrap 与 topbar 共用一份，不会再各写一个数导致两层错位。 */
+    --page-w:1440px; --page-pad:24px;
+  }
+  /* 暗色：不是纯黑，走冷灰蓝，卡片比背景亮一档 */
+  html[data-theme="dark"]{
+    --bg:#0f1216; --card:#171b21; --ink:#e7eaef; --muted:#8b95a4;
+    --line:#2a3038; --brand:#4f9d80; --brand-soft:#183026;
+    --warn:#d9a955; --warn-bg:#2e2617; --danger:#e0796a; --danger-bg:#331e1b;
+    --ok:#54bf8b; --ok-bg:#14301f;
+    --surface:#1e232b; --surface-2:#22282f; --hover:#262d36;
+    --line-soft:#222831; --line-soft2:#232a33; --track:#2a323b;
+    --ok-line:#25503a; --warn-line:#4a3c20; --danger-line:#4d2b26;
+    --bar2:#4a7d68;
+    --heat-0:#1b2128; --heat-1:#1f332a; --heat-2:#27473a;
+    --heat-3:#33604d; --heat-4:#417a61; --heat-5:#4f9d80;
+    --pre-bg:#0b0e12; --pre-ink:#cfd6df;
+    --topbar:#12161be6; --shadow:0 1px 3px #00000059;
+    --dot-idle:#3c4553; --ind-bg:#2f3944;
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);
        font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
-  .wrap{max-width:960px;margin:0 auto;padding:20px 18px 48px}
-  header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
-  h1{font-size:18px;font-weight:650;margin:0;letter-spacing:.2px}
-  .ver{font-size:12px;color:var(--muted)}
+  /* 主题切换：只过渡颜色，不碰布局 */
+  body,.card,.topbar,.pill,button,input,select,textarea,.kpi,.msg,
+  .bar,.chrow .track,t th,td,.notes,.subcard,.gaprow{
+    transition:background-color .28s ease, border-color .28s ease,
+               color .28s ease, box-shadow .28s ease;
+  }
+  .wrap{max-width:var(--page-w);margin:0 auto;padding:0 var(--page-pad) 48px}
+
+  /* ═══════════ 顶部导航栏（v1.0.19） ═══════════ */
+  .topbar{position:sticky;top:0;z-index:30;background:var(--topbar);
+          backdrop-filter:saturate(160%) blur(12px);-webkit-backdrop-filter:saturate(160%) blur(12px);
+          border-bottom:1px solid var(--line);box-shadow:var(--shadow)}
+  .bar-inner{max-width:var(--page-w);margin:0 auto;padding:9px var(--page-pad);
+             display:flex;align-items:center;gap:16px}
+  .brand{display:flex;align-items:center;gap:8px;flex:0 0 auto;min-width:0}
+  .dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto;
+       background:var(--dot-idle);transition:background-color .3s ease, box-shadow .3s ease}
+  .dot.ok{background:var(--ok);box-shadow:0 0 0 3px var(--ok-bg)}
+  .dot.bad{background:var(--danger);box-shadow:0 0 0 3px var(--danger-bg);
+           animation:dotPulse 1.8s ease-in-out infinite}
+  @keyframes dotPulse{0%,100%{box-shadow:0 0 0 3px var(--danger-bg)}
+                      50%{box-shadow:0 0 0 6px transparent}}
+  h1{font-size:16px;font-weight:650;margin:0;letter-spacing:.2px;white-space:nowrap}
+  .ver{font-size:11.5px;color:var(--muted);white-space:nowrap}
+  /* 导航：指示条随选中项滑动 */
+  .tabs{position:relative;display:flex;gap:2px;flex:0 0 auto;
+        background:var(--surface-2);border-radius:999px;padding:3px}
+  .tab{position:relative;z-index:1;font:inherit;font-size:13px;font-weight:600;
+       padding:6px 18px;border:0;border-radius:999px;background:transparent;
+       color:var(--muted);cursor:pointer;white-space:nowrap;
+       transition:color .22s ease}
+  .tab:hover{background:transparent;color:var(--ink)}
+  .tab.active{color:var(--ink)}
+  .tab:focus-visible{outline:2px solid var(--brand-soft);outline-offset:1px}
+  html[data-theme="dark"] .tab.active{color:#f2f6fa}
+  .ind{position:absolute;top:3px;bottom:3px;left:3px;width:0;z-index:0;
+       background:var(--ind-bg);border-radius:999px;box-shadow:var(--shadow);
+       transition:left .3s cubic-bezier(.34,1.3,.5,1), width .3s cubic-bezier(.34,1.3,.5,1);
+       pointer-events:none}
+  .tb-right{margin-left:auto;display:flex;align-items:center;gap:8px;flex:0 0 auto}
   .pill{font-size:12px;padding:2px 9px;border-radius:999px;border:1px solid var(--line);
-        background:#fff;color:var(--muted)}
-  .pill.ok{background:var(--ok-bg);color:var(--ok);border-color:#cfe2d6}
-  .pill.bad{background:var(--danger-bg);color:var(--danger);border-color:#efd2cd}
+        background:var(--surface);color:var(--muted);white-space:nowrap}
+  .pill.ok{background:var(--ok-bg);color:var(--ok);border-color:var(--ok-line)}
+  .pill.bad{background:var(--danger-bg);color:var(--danger);border-color:var(--danger-line)}
+  /* 主题切换按钮：图标旋转交叉淡出 */
+  .theme-btn{width:32px;height:32px;padding:0;border-radius:50%;border:1px solid var(--line);
+             background:var(--surface);color:var(--muted);cursor:pointer;
+             display:flex;align-items:center;justify-content:center;position:relative}
+  .theme-btn:hover{background:var(--hover);color:var(--ink)}
+  .theme-btn svg{width:16px;height:16px;position:absolute;
+                 transition:opacity .25s ease, transform .35s cubic-bezier(.4,0,.2,1)}
+  .theme-btn .ic-sun{opacity:0;transform:rotate(-90deg) scale(.5)}
+  html[data-theme="dark"] .theme-btn .ic-moon{opacity:0;transform:rotate(90deg) scale(.5)}
+  html[data-theme="dark"] .theme-btn .ic-sun{opacity:1;transform:rotate(0) scale(1)}
+
+  /* ═══════════ 页面切换动效 ═══════════ */
+  .page{display:none}
+  .page.active{display:block;animation:pageIn .28s cubic-bezier(.2,.8,.3,1) both}
+  @keyframes pageIn{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
+  .page-pad{padding-top:18px}
   .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
         padding:16px;margin-bottom:14px}
   .card h2{font-size:13px;font-weight:650;margin:0 0 12px;color:var(--muted);
@@ -30,15 +123,15 @@
   .meta b{color:var(--ink);font-weight:600}
   .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
   button{font:inherit;padding:7px 14px;border-radius:8px;border:1px solid var(--line);
-         background:#fff;color:var(--ink);cursor:pointer}
-  button:hover{background:#f3f0e9}
+         background:var(--surface);color:var(--ink);cursor:pointer}
+  button:hover{background:var(--hover)}
   button.primary{background:var(--brand);border-color:var(--brand);color:#fff}
   button.primary:hover{filter:brightness(1.06)}
   button:disabled{opacity:.55;cursor:default}
   table{width:100%;border-collapse:collapse;font-size:13px}
   th{font-size:12px;color:var(--muted);font-weight:600;text-align:left;
      padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
-  td{padding:8px;border-bottom:1px solid #f0ece3;white-space:nowrap}
+  td{padding:8px;border-bottom:1px solid var(--line-soft);white-space:nowrap}
   td.num{font-variant-numeric:tabular-nums}
   .tag{font-size:12px;padding:1px 8px;border-radius:999px}
   .tag.ok{background:var(--ok-bg);color:var(--ok)}
@@ -49,7 +142,7 @@
   label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:4px}
   input[type=text],input[type=number],input[type=time],select,textarea{
     width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:8px;
-    background:#fff;color:var(--ink);font:inherit}
+    background:var(--surface);color:var(--ink);font:inherit}
   input:focus{outline:2px solid var(--brand-soft);border-color:var(--brand)}
   .checks{display:flex;gap:16px;flex-wrap:wrap;margin-top:6px}
   .checks label{display:flex;align-items:center;gap:6px;margin:0;color:var(--ink);font-size:13px}
@@ -76,14 +169,14 @@
   .hint{font-size:12px;color:var(--muted);margin-top:6px}
   .notes{font-size:12px;color:var(--muted);line-height:1.75;margin-top:14px;
          padding-top:12px;border-top:1px dashed var(--line)}
-  .notes code{font-size:11.5px;background:#f3f0e9;border-radius:4px;padding:1px 5px}
+  .notes code{font-size:11.5px;background:var(--hover);border-radius:4px;padding:1px 5px}
   .msg{margin-top:10px;font-size:13px;padding:9px 11px;border-radius:8px;
-       border:1px solid var(--line);background:#fff;white-space:pre-wrap;display:none}
+       border:1px solid var(--line);background:var(--surface);white-space:pre-wrap;display:none}
   .msg.show{display:block}
-  .msg.ok{background:var(--ok-bg);border-color:#cfe2d6;color:var(--ok)}
-  .msg.bad{background:var(--danger-bg);border-color:#efd2cd;color:var(--danger)}
-  .msg.warn{background:var(--warn-bg);border-color:#eeddb4;color:var(--warn)}
-  pre{background:#26292e;color:#e6e3dc;padding:12px;border-radius:8px;overflow:auto;
+  .msg.ok{background:var(--ok-bg);border-color:var(--ok-line);color:var(--ok)}
+  .msg.bad{background:var(--danger-bg);border-color:var(--danger-line);color:var(--danger)}
+  .msg.warn{background:var(--warn-bg);border-color:var(--warn-line);color:var(--warn)}
+  pre{background:var(--pre-bg);color:var(--pre-ink);padding:12px;border-radius:8px;overflow:auto;
       font-size:12px;line-height:1.5;max-height:340px;margin:0}
   details summary{cursor:pointer;font-size:13px;color:var(--muted);font-weight:600}
   .flex-between{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
@@ -91,7 +184,7 @@
   button.mini.active{background:var(--brand);border-color:var(--brand);color:#fff}
   .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));
         gap:9px;margin:14px 0 2px}
-  .kpi{border:1px solid var(--line);border-radius:9px;padding:9px 11px;background:#fff}
+  .kpi{border:1px solid var(--line);border-radius:9px;padding:9px 11px;background:var(--surface)}
   .kpi .k{display:block;font-size:11.5px;color:var(--muted);white-space:nowrap}
   .kpi b{display:block;font-size:16px;font-weight:650;margin-top:2px;
          font-variant-numeric:tabular-nums;white-space:nowrap}
@@ -101,10 +194,11 @@
   .cols{display:flex;align-items:flex-end;gap:4px;height:92px;min-width:100%}
   .col{flex:1 1 0;min-width:10px;height:100%;display:flex;align-items:flex-end;
        justify-content:center}
-  .bar{width:78%;max-width:44px;height:100%;background:#eeeae1;border-radius:4px 4px 2px 2px;
+  .bar{width:78%;max-width:44px;height:100%;background:var(--track);border-radius:4px 4px 2px 2px;
        display:flex;align-items:flex-end;overflow:hidden}
-  .bar i{display:block;width:100%;background:var(--brand);border-radius:2px}
-  .bar.empty{background:#f7f5f0}
+  .bar i{display:block;width:100%;background:var(--brand);border-radius:2px;
+         transform-origin:bottom}
+  .bar.empty{background:var(--surface-2)}
   .xlabels{display:flex;gap:4px;margin-top:5px;min-width:100%}
   .xlabels span{flex:1 1 0;min-width:10px;text-align:center;font-size:10px;
                 color:var(--muted);white-space:nowrap;overflow:hidden}
@@ -119,28 +213,53 @@
                 text-align:center;white-space:nowrap;border:0;background:none}
   table.heat th.rowh{text-align:right;padding-right:5px}
   table.heat td{width:15px;height:15px;padding:0;border:0;border-radius:3px;
-                background:#efece4}
+                background:var(--track)}
   .chrow{display:flex;align-items:center;gap:9px;padding:5px 0;font-size:13px}
   .chrow .nm{flex:0 0 104px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .chrow .track{flex:1 1 auto;height:12px;background:#eeeae1;border-radius:999px;
+  .chrow .track{flex:1 1 auto;height:12px;background:var(--track);border-radius:999px;
                 overflow:hidden;min-width:56px}
-  .chrow .track i{display:block;height:100%;background:var(--brand);border-radius:999px}
+  .chrow .track i{display:block;height:100%;background:var(--brand);border-radius:999px;
+                  transition:width .5s cubic-bezier(.2,.8,.3,1)}
   .chrow .track i.warn{background:#c58a2b}
   .chrow .track i.bad{background:#b4553f}
   .chrow .val{flex:0 0 auto;font-size:12px;color:var(--muted);
               font-variant-numeric:tabular-nums;white-space:nowrap}
   .gaprow{display:flex;gap:10px;align-items:baseline;padding:5px 0;font-size:12.5px;
-          border-bottom:1px solid #f4f1ea;flex-wrap:wrap}
+          border-bottom:1px solid var(--line-soft2);flex-wrap:wrap}
   .gaprow:last-child{border-bottom:0}
   .gaprow .gname{flex:0 0 auto;font-weight:600;white-space:nowrap}
   .gaprow .gtime{flex:1 1 auto;color:var(--muted);font-variant-numeric:tabular-nums}
   .gaprow .gmin{flex:0 0 auto;color:var(--danger);font-variant-numeric:tabular-nums;
                 white-space:nowrap}
 
+  /* ---------- 数据入场动画（切页 / 切区间时播放，15 秒轮询不重播） ---------- */
+  .anim .bar i{animation:barGrow .55s cubic-bezier(.2,.8,.3,1) both}
+  .anim .kpi{animation:kpiIn .38s cubic-bezier(.2,.8,.3,1) both}
+  .anim .kpi:nth-child(2){animation-delay:.035s}
+  .anim .kpi:nth-child(3){animation-delay:.07s}
+  .anim .kpi:nth-child(4){animation-delay:.105s}
+  .anim .kpi:nth-child(5){animation-delay:.14s}
+  .anim .kpi:nth-child(6){animation-delay:.175s}
+  @keyframes barGrow{from{transform:scaleY(.001)}to{transform:scaleY(1)}}
+  @keyframes kpiIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .anim .heatwrap td{animation:heatIn .4s ease both}
+  @keyframes heatIn{from{opacity:0}to{opacity:1}}
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{animation-duration:.001ms !important;animation-iteration-count:1 !important;
+                         transition-duration:.001ms !important}
+  }
+
   /* ---------- 手机端（≤640px） ---------- */
   @media (max-width: 640px) {
-    .wrap{padding:14px 12px 40px}
-    h1{font-size:16px}
+    .wrap{padding:0 12px 40px}
+    /* 顶栏：第一行品牌+主题按钮，第二行导航占满整行 */
+    .bar-inner{flex-wrap:wrap;padding:9px 12px;gap:8px 10px}
+    h1{font-size:14.5px}
+    .ver{display:none}
+    .tabs{order:3;width:100%;margin-top:2px}
+    .tab{flex:1 1 0;padding:7px 10px}
+    .pill{display:none}
+    .page-pad{padding-top:14px}
     /* 兜底：任何宽内容都不许顶出屏幕 */
     .card{overflow-x:auto;-webkit-overflow-scrolling:touch}
     /* 通道表 → 一个通道一张小卡 */
@@ -175,51 +294,64 @@
     .cols{height:74px}
     .chrow .nm{flex-basis:74px;font-size:12.5px}
     .chrow .val{font-size:11px}
+    /* 热力图在手机上压格子，24 小时 × 7 天能整屏放下，不用横向拖 */
+    table.heat{border-spacing:1px;font-size:9px}
+    table.heat th{font-size:8.5px;padding:0 1px}
+    table.heat th.rowh{padding-right:3px;max-width:44px;overflow:hidden}
+    table.heat td{width:9px;height:9px;border-radius:2px}
+    /* 顶栏在手机上从 grid 切回 flex，才能 wrap 成两行 */
+    .bar-inner{display:flex;flex-wrap:wrap}
+    .brand{flex:1 1 auto}
+  }
+
+  /* ═══════════ 宽屏适配（后置覆盖，故意放在最末） ═══════════ */
+  /* 版面从 960 铺到 1440 之后，配置页暴露了新问题：那一页全是表单，
+     form .grid 是 minmax(220px,1fr) 的 auto-fit，宽度一给它就直接排成 5~6 列，
+     字段被压成一根根细条，反而没法填。所以配置页单独限宽居中，并把列数封顶 3。
+     概览页是数据页（KPI / 热力图 / 通道表），继续铺满，宽度越多越好看。 */
+  #page-config{max-width:1080px;margin:0 auto}
+  @media (min-width:1000px){
+    form .grid{grid-template-columns:repeat(3,minmax(0,1fr))}
   }
 
 </style>
 </head>
 <body>
+<header class="topbar">
+  <div class="bar-inner">
+    <div class="brand">
+      <span class="dot" id="brandDot"></span>
+      <h1>EasyNVR 录像监控</h1>
+      <span class="ver" id="ver">v—</span>
+    </div>
+    <nav class="tabs" id="tabs" role="tablist" aria-label="页面切换">
+      <span class="ind" id="tabInd"></span>
+      <button class="tab active" type="button" data-page="overview" role="tab"
+              aria-selected="true" aria-controls="page-overview">概览</button>
+      <button class="tab" type="button" data-page="config" role="tab"
+              aria-selected="false" aria-controls="page-config">配置</button>
+    </nav>
+    <div class="tb-right">
+      <span class="pill" id="statePill">加载中…</span>
+      <button class="theme-btn" id="btnTheme" type="button"
+              aria-label="切换亮色 / 暗色主题" title="切换亮色 / 暗色">
+        <svg class="ic-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+             aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+        <svg class="ic-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+             aria-hidden="true"><circle cx="12" cy="12" r="4.2"/>
+          <path d="M12 2.2v2.4M12 19.4v2.4M2.2 12h2.4M19.4 12h2.4M4.9 4.9l1.7 1.7M17.4 17.4l1.7 1.7M19.1 4.9l-1.7 1.7M6.6 17.4l-1.7 1.7"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
 <div class="wrap">
-  <header>
-    <h1>EasyNVR 录像监控</h1>
-    <span class="ver" id="ver">v—</span>
-    <span class="pill" id="statePill">加载中…</span>
-  </header>
-
-  <div class="card">
-    <div class="meta">
-      <span>录像目录 <b id="mRoot">—</b></span>
-      <span>上次检测 <b id="mLast">—</b></span>
-      <span>下次检测 <b id="mNext">—</b></span>
-      <span>下次日报 <b id="mNextDaily">—</b></span>
-      <span>告警推送计划 <b id="mPlan">—</b></span>
-      <span>通道布局 <b id="mLayout">—</b></span>
-    </div>
-    <div class="row" style="margin-top:14px">
-      <button class="primary" id="btnScan">立即检测</button>
-      <button id="btnTest">测试推送</button>
-      <button id="btnDaily">补发最近一期日报</button>
-      <button id="btnLogs">查看日志</button>
-      <button id="btnDoctor">一键自检</button>
-    </div>
-    <div class="msg" id="msg"></div>
-  </div>
-
-  <div class="card">
-    <h2>通道状态</h2>
-    <div id="chanBox"><div class="empty">尚未检测</div></div>
-    <div class="hint" id="rootErr"></div>
-    <div class="notes">
-      · 在线时长 = 从最新录像往回、相邻文件间隔不超过 <b>5 分钟</b> 的连续录像时长；
-      超过 100 小时转成「天/时」，超过 100 天转成「月/天/时」（最长约保留 180 天）。
-      通道断流 / 无录像时显示 <code>—</code>。
-    </div>
-  </div>
-
+<section class="page active page-pad" id="page-overview">
   <div class="card" id="statCard">
     <div class="flex-between">
-      <h2 style="margin:0">统计</h2>
+      <h2 style="margin:0">录像概览</h2>
       <div class="row" id="statRange">
         <button type="button" class="mini" data-range="today">今天</button>
         <button type="button" class="mini" data-range="yesterday">昨天</button>
@@ -254,10 +386,42 @@
     <div class="notes">
       · <b>不需要额外采集</b>：每个录像文件的修改时间就是「那一刻在录」的证据，统计直接从磁盘反推，
       所以升级完马上能看到历史，也不新增数据库、不占空间。<br>
-      · <b>在线</b> = 相邻录像间隔不超过 5 分钟（与状态页「在线时长」同一口径）；<b>闲置</b> = 窗口时长 − 在线时长。<br>
+      · <b>在线</b> = 相邻录像间隔不超过 5 分钟（与「通道状态」的在线时长同一口径）；<b>闲置</b> = 窗口时长 − 在线时长。<br>
       · 热力图是<b>每格在该小时内的录像覆盖比例</b>：100% = 整小时都在录，空白 = 那一小时没录像。
       单日视图的行是通道，多日视图的行是日期。<br>
       · 汇总一律取<b>每通道平均</b>——否则 10 个通道的「每日在线」会被叠加成 240 小时。
+    </div>
+  </div>
+</section>
+
+<section class="page page-pad" id="page-config">
+  <div class="card">
+    <div class="meta">
+      <span>录像目录 <b id="mRoot">—</b></span>
+      <span>上次检测 <b id="mLast">—</b></span>
+      <span>下次检测 <b id="mNext">—</b></span>
+      <span>下次日报 <b id="mNextDaily">—</b></span>
+      <span>告警推送计划 <b id="mPlan">—</b></span>
+      <span>通道布局 <b id="mLayout">—</b></span>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button class="primary" id="btnScan">立即检测</button>
+      <button id="btnTest">测试推送</button>
+      <button id="btnDaily">补发最近一期日报</button>
+      <button id="btnLogs">查看日志</button>
+      <button id="btnDoctor">一键自检</button>
+    </div>
+    <div class="msg" id="msg"></div>
+  </div>
+
+  <div class="card">
+    <h2>通道状态</h2>
+    <div id="chanBox"><div class="empty">尚未检测</div></div>
+    <div class="hint" id="rootErr"></div>
+    <div class="notes">
+      · 在线时长 = 从最新录像往回、相邻文件间隔不超过 <b>5 分钟</b> 的连续录像时长；
+      超过 100 小时转成「天/时」，超过 100 天转成「月/天/时」（最长约保留 180 天）。
+      通道断流 / 无录像时显示 <code>—</code>。
     </div>
   </div>
 
@@ -481,6 +645,7 @@
     </div>
     <pre id="logBox">—</pre>
   </div>
+</section>
 </div>
 
 <script>
@@ -644,6 +809,11 @@ function render(d){
   pill.className = 'pill ' + (bad ? 'bad' : (d.channels || []).length ? 'ok' : '');
   pill.textContent = bad ? (d.alerting + ' 个通道异常') :
                      ((d.channels || []).length ? '全部正常' : '等待检测');
+  const dot = $('brandDot');
+  if (dot) {
+    dot.className = 'dot ' + (bad ? 'bad' : ((d.channels || []).length ? 'ok' : ''));
+    dot.title = pill.textContent;
+  }
   $('mRoot').textContent = d.root || '—';
   $('mLast').textContent = d.last_check_str || '—';
   $('mNext').textContent = d.next_scan_sec > 0 ? ('约 ' + d.next_scan_sec + ' 秒后') : '即将进行';
@@ -810,7 +980,7 @@ function barChart(bars, mode){
       const h = (b.files || 0) / maxFiles * 100;
       cols += '<div class="col" title="' + esc(tip) + '"><div class="bar' +
               ((b.files || 0) ? '' : ' empty') + '">' +
-              '<i style="height:' + h.toFixed(1) + '%;background:#8fb3a3"></i></div></div>';
+              '<i style="height:' + h.toFixed(1) + '%;background:var(--bar2)"></i></div></div>';
     }
     const show = (i % skip === 0) || i === n - 1;
     xl += '<span class="' + (show ? '' : 'blank') + '">' + esc(b.label) + '</span>';
@@ -822,12 +992,12 @@ function barChart(bars, mode){
 /* 热力图色阶：0 → 浅灰，1 → 品牌绿。null 表示"还没走到的小时"，留空。 */
 function heatBg(v){
   if (v === null || v === undefined) return 'transparent';
-  if (v <= 0.001) return '#f2efe8';
-  if (v < 0.2) return '#dfe8e2';
-  if (v < 0.4) return '#c2d8cc';
-  if (v < 0.6) return '#9dc4b2';
-  if (v < 0.8) return '#6fa48f';
-  return '#3f6f5f';
+  if (v <= 0.001) return 'var(--heat-0)';
+  if (v < 0.2) return 'var(--heat-1)';
+  if (v < 0.4) return 'var(--heat-2)';
+  if (v < 0.6) return 'var(--heat-3)';
+  if (v < 0.8) return 'var(--heat-4)';
+  return 'var(--heat-5)';
 }
 
 function heatTable(heat){
@@ -836,9 +1006,9 @@ function heatTable(heat){
   const cells = (heat && heat.cells) || [];
   if (!rows.length) return '<div class="empty">没有数据</div>';
   let h = '<div class="legend"><span>' +
-          '<i style="background:#f2efe8"></i>无录像</span><span>' +
-          '<i style="background:#c2d8cc"></i>一半</span><span>' +
-          '<i style="background:#3f6f5f"></i>整小时</span></div>' +
+          '<i style="background:var(--heat-0)"></i>无录像</span><span>' +
+          '<i style="background:var(--heat-2)"></i>一半</span><span>' +
+          '<i style="background:var(--heat-5)"></i>整小时</span></div>' +
           '<div class="heatwrap"><table class="heat"><thead><tr><th class="rowh"></th>';
   for (const c of cols) h += '<th>' + esc(c) + '</th>';
   h += '</tr></thead><tbody>';
@@ -908,7 +1078,7 @@ function renderStats(d){
   $('statPctTitle').textContent = d.single_day ? '每小时在线率' : '每日在线率';
   $('statPct').innerHTML =
     '<div class="legend"><span><i style="background:var(--brand)"></i>在线</span>' +
-    '<span><i style="background:#eeeae1"></i>闲置</span></div>' +
+    '<span><i style="background:var(--track)"></i>闲置</span></div>' +
     barChart(d.bars, 'pct');
   $('statCount').innerHTML = barChart(d.bars, 'count');
   $('statHeat').innerHTML = heatTable(d.heat);
@@ -916,24 +1086,104 @@ function renderStats(d){
   $('statGaps').innerHTML = gapList(d);
 }
 
-async function loadStats(){
+/* 数据入场动画：切页 / 切区间才播，15 秒轮询不重播 */
+function playAnim(){
+  const card = $('statCard');
+  if (!card) return;
+  card.classList.remove('anim');
+  void card.offsetWidth;              // 强制重排，让动画从头播
+  card.classList.add('anim');
+  clearTimeout(playAnim._t);
+  playAnim._t = setTimeout(() => card.classList.remove('anim'), 950);
+}
+
+async function loadStats(animate){
   document.querySelectorAll('#statRange button').forEach(b => {
     b.classList.toggle('active', b.dataset.range === statRange);
   });
   try {
     renderStats(await call('stats', {range: statRange}));
+    if (animate) playAnim();
   } catch (e) {
     $('statSpan').textContent = '⚠ 统计加载失败：' + e.message;
   }
 }
 
 document.querySelectorAll('#statRange button').forEach(btn => {
-  btn.addEventListener('click', () => { statRange = btn.dataset.range; loadStats(); });
+  btn.addEventListener('click', () => { statRange = btn.dataset.range; loadStats(true); });
 });
 
+/* ══════════════════ 页面切换 / 主题（v1.0.19） ══════════════════ */
+
+let curPage = 'overview';
+
+/* 指示条跟着选中项走：left / width 都是相对 .tabs 的 padding box */
+function moveInd(){
+  const ind = $('tabInd');
+  const act = [...document.querySelectorAll('#tabs .tab')]
+    .find(t => t.dataset.page === curPage);
+  if (!ind || !act) return;
+  ind.style.left = act.offsetLeft + 'px';
+  ind.style.width = act.offsetWidth + 'px';
+}
+
+function showPage(name, animate){
+  curPage = name;
+  document.querySelectorAll('#tabs .tab').forEach(t => {
+    const on = t.dataset.page === name;
+    t.classList.toggle('active', on);
+    t.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  document.querySelectorAll('.page').forEach(p => {
+    p.classList.toggle('active', p.id === 'page-' + name);
+  });
+  moveInd();
+  try { localStorage.setItem('erm.page', name); } catch (e) {}
+  /* 概览页才拉统计数据，配置页不白扫一遍盘 */
+  if (name === 'overview') loadStats(animate !== false);
+}
+
+document.querySelectorAll('#tabs .tab').forEach(t => {
+  t.addEventListener('click', () => {
+    if (t.dataset.page !== curPage) showPage(t.dataset.page);
+  });
+});
+/* 键盘：← → 切页 */
+document.addEventListener('keydown', e => {
+  if (e.target && /input|textarea|select/i.test(e.target.tagName)) return;
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+  const order = ['overview', 'config'];
+  const i = order.indexOf(curPage);
+  const next = order[(i + (e.key === 'ArrowRight' ? 1 : order.length - 1)) % order.length];
+  if (next !== curPage) showPage(next);
+});
+window.addEventListener('resize', moveInd);
+window.addEventListener('load', moveInd);
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(moveInd);
+
+/* 主题：亮 / 暗，记住用户选择；没选过就跟系统 */
+function setTheme(t){
+  document.documentElement.setAttribute('data-theme', t === 'dark' ? 'dark' : 'light');
+  try { localStorage.setItem('erm.theme', t); } catch (e) {}
+  const btn = $('btnTheme');
+  if (btn) btn.title = t === 'dark' ? '切换到亮色' : '切换到暗色';
+}
+$('btnTheme').addEventListener('click', () => {
+  setTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+});
+setTheme(document.documentElement.getAttribute('data-theme') || 'light');
+
+/* 启动：恢复上次所在的页（没记录就概览） */
+let startPage = 'overview';
+try { startPage = localStorage.getItem('erm.page') || 'overview'; } catch (e) {}
+if (startPage !== 'overview' && startPage !== 'config') startPage = 'overview';
+
 load();
-loadStats();
-setInterval(() => { load(); loadStats(); }, 15000);
+showPage(startPage, true);
+setInterval(() => {
+  load();
+  if (curPage === 'overview') loadStats(false);
+}, 15000);
 </script>
 </body>
 </html>

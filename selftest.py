@@ -932,6 +932,38 @@ def test_alert_retry(webhook):
     eq(MockHandler.hits, 0, "静默期内不发请求")
 
 
+def test_ui_shell():
+    """v1.0.19：顶部导航 / 亮暗双主题 / 两页结构。纯静态断言，防止改样式时把骨架改坏。"""
+    html = open(os.path.join(APP, "www", "index.html"), encoding="utf-8").read()
+
+    # ① 主题：首帧前定主题，避免深色用户看到白闪
+    ok("data-theme" in html, "index.html 有主题属性")
+    ok("localStorage.getItem('erm.theme')" in html, "主题偏好存 localStorage")
+    ok("prefers-color-scheme" in html, "没选过时跟随系统深色偏好")
+
+    # ② 两页导航
+    ok('id="tabs"' in html, "有顶部导航容器")
+    eq(html.count('data-page="overview"'), 1, "导航项「概览」唯一")
+    eq(html.count('data-page="config"'), 1, "导航项「配置」唯一")
+    ok('id="page-overview"' in html and 'id="page-config"' in html, "两个页面容器都在")
+    eq(html.count('id="tabInd"'), 1, "导航指示条唯一")
+
+    i_ov = html.index('id="page-overview"')
+    i_stat = html.index('id="statCard"')
+    i_cf = html.index('id="page-config"')
+    i_form = html.index('id="cfgForm"')
+    ok(i_ov < i_stat < i_cf, "图表卡片在概览页内")
+    ok(i_cf < i_form, "配置表单在配置页内")
+    ok(i_stat < i_form, "概览排在配置之前（首页即图表）")
+
+    # ③ 主题变量两套齐全：漏一个就会在某个主题下露出硬编码颜色
+    for v in ("--bg", "--card", "--ink", "--muted", "--surface", "--track",
+              "--heat-0", "--heat-5", "--ind-bg", "--pre-bg"):
+        eq(html.count(v + ":"), 2, "变量 %s 亮/暗各定义一次" % v)
+
+    ok("@media (prefers-reduced-motion: reduce)" in html, "尊重系统「减少动态效果」")
+
+
 def main():
     print("== erm 自检开始（数据目录 %s）" % TMP_VAR)
     srv, webhook = start_mock()
@@ -940,7 +972,7 @@ def main():
                    test_easynvr_layout, test_online_streak,
                    test_scan_alert_and_silence, test_daily_schedule, test_report_text,
                    test_push_plan_and_report_window, test_stats,
-                   test_normalize_keeps_secret):
+                   test_normalize_keeps_secret, test_ui_shell):
             fn()
         test_push(webhook)
         test_rate_limit_retry(webhook)

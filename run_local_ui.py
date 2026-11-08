@@ -177,6 +177,9 @@ def main():
     s.connect(SOCK)
     body = json.dumps({"action": "save_config", "config": {
         "record_root": REC, "alert_threshold_minutes": "60", "scan_interval": "60",
+        # v1.1.7 起「源端录像方式」是必选项，漏了会整条保存失败（validate 报错），
+        # 表现是页面一片空白、通道表 0 行 —— 截图时踩过一次。
+        "record_mode": "continuous",
         "video_exts": ".mp4", "daily_report_time": "08:00"}}).encode()
     s.sendall(b"POST /app/erm/api HTTP/1.1\r\nHost: localhost\r\nContent-Length: "
               + str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n" + body)

@@ -295,6 +295,20 @@ bash gen_icons.py             # 只有换图标时才需要
 4. 建 Release，标题/附件名按上表；**附件改名只在上传时指定**，不动 `dist/erm.fpk`；
 5. 换附件名要"先传新名 → 回读比对 sha256 → 再删旧名"（GitHub 不支持重命名附件，中途失败会丢包）。
 
+> ⚠️ **`fnpack` 打包不可重现，别拿整体 sha256 判断"包是不是最新的"**（2026-11-08 实测）：
+> 同一份源码连打两次，`dist/erm.fpk` 整体 sha256 不同（`ee0b5451…` vs `9b2db398…`），
+> 但解开 `app.tgz` 后 20 个文件内容逐字节一致 —— tar/gzip 会带时间戳与顺序信息。所以：
+>
+> - **判断源码有没有变**：`find erm -newermt "<打包时间>"` 是否为空；或把新旧两包都解开，
+>   对 `tar tzf app.tgz` 的每个文件做 `sha256sum` 逐项比对（这是唯一可靠的方式）；
+> - **判断下载的包是否完整**：整体 sha256 只适用于"同一个文件传前 / 传后"比对（即上面第 5 步），
+>   不能拿重建包去比已发布包；
+> - 做完重建验证记得把 `dist/erm.fpk` 还原成已发布的那一份，否则本地包与 Release 正文里
+>   声明的 sha256 不一致，后来人一校验就懵。
+>
+> 另外：**`run_local_ui.py` 这类工程根目录的调试脚本不进包**（`build.sh` 只打 `erm/`），
+> 修它们不需要重新打包。判断口径同上一条 —— 看 `erm/` 有没有改动。
+
 > **`git push` 报 `gnutls_handshake() failed` 时**（`github.com` 的 git 通道偶发不通，
 > 但 `api.github.com` / `uploads.github.com` 正常）：别改代码，直接走 REST ——
 > 用 Git Data API 重放提交（`POST /git/blobs` → `POST /git/trees`（带 `base_tree`）→

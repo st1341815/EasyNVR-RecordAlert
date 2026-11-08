@@ -401,6 +401,12 @@ def test_record_mode():
     for m in C.RECORD_MODES:
         ok('value="%s"' % m in html, "页面：下拉里有 %s 选项" % m)
     ok("必选" in html, "页面：标明是必选项")
+    # v1.1.8 版面：录像方式是判据前提，排在录像目录前面（桌面端两者同一行）；
+    # 三种模式的说明统一进卡片底部的注释，下拉下方不再挂跟着选项跳动的动态小字。
+    ok(html.index('id="record_mode"') < html.index('id="record_root"'),
+       "页面：录像方式排在录像目录前面")
+    ok('id="recordModeHint"' not in html, "页面：下拉下方不再挂动态小字")
+    ok('id="modeExtraWrap"' in html, "页面：补充项有独立容器（跟着下拉显隐，不挤占首行）")
 
 
 def test_easynvr_layout():

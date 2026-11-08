@@ -193,6 +193,9 @@
   .msg.warn{background:var(--warn-bg);border-color:var(--warn-line);color:var(--warn)}
   pre{background:var(--pre-bg);color:var(--pre-ink);padding:12px;border-radius:8px;overflow:auto;
       font-size:12px;line-height:1.5;max-height:340px;margin:0}
+  /* 日志页整页就这一块：给足高度（跟着视口走），长行折行，别逼人横向拖 */
+  #logBox{height:clamp(320px,calc(100vh - 290px),880px);max-height:none;
+          white-space:pre-wrap;word-break:break-word}
   details summary{cursor:pointer;font-size:13px;color:var(--muted);font-weight:600}
   .flex-between{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
   /* ---------- 统计页（v1.0.18） ---------- */
@@ -341,8 +344,9 @@
      字段被压成一根根细条，反而没法填。所以配置页单独限宽居中，并把列数封顶 3。
      概览页原本铺满 1440（数据页，宽度越多越好看），
      2026-11-08 起按用户要求也收成 1080 —— 两页切换时宽度不再跳。
-     备份页同样是表单，一并收进 1080，翻页时三页宽度一致。 */
-  #page-config,#page-backup,#page-overview{max-width:1080px;margin:0 auto}
+     备份页同样是表单，一并收进 1080；
+     日志页只有一块文本，也跟着收，四页翻来翻去宽度不再跳。 */
+  #page-config,#page-backup,#page-log,#page-overview{max-width:1080px;margin:0 auto}
   @media (min-width:1000px){
     form .grid{grid-template-columns:repeat(3,minmax(0,1fr))}
   }
@@ -365,6 +369,8 @@
               aria-selected="false" aria-controls="page-config">配置</button>
       <button class="tab" type="button" data-page="backup" role="tab"
               aria-selected="false" aria-controls="page-backup">备份</button>
+      <button class="tab" type="button" data-page="log" role="tab"
+              aria-selected="false" aria-controls="page-log">日志</button>
     </nav>
     <div class="tb-right">
       <span class="pill" id="statePill">加载中…</span>
@@ -455,7 +461,6 @@
       <button class="primary" id="btnScan">立即检测</button>
       <button id="btnTest">测试推送</button>
       <button id="btnDaily">补发最近一期日报</button>
-      <button id="btnLogs">查看日志</button>
       <button id="btnDoctor">一键自检</button>
     </div>
     <div class="msg" id="msg"></div>
@@ -727,14 +732,6 @@
     <h2>自检</h2>
     <div id="doctorBox"></div>
   </div>
-
-  <div class="card" id="logCard" style="display:none">
-    <div class="flex-between" style="margin-bottom:10px">
-      <h2 style="margin:0">运行日志</h2>
-      <button id="btnLogRefresh">刷新</button>
-    </div>
-    <pre id="logBox">—</pre>
-  </div>
 </section>
 
 <section class="page page-pad" id="page-backup">
@@ -830,6 +827,32 @@
   <div class="card">
     <h2>备份记录</h2>
     <div id="bkBox"><div class="empty">还没有备份</div></div>
+  </div>
+</section>
+
+<section class="page page-pad" id="page-log">
+  <div class="card">
+    <div class="flex-between">
+      <h2 style="margin:0">运行日志</h2>
+      <div class="row" style="gap:6px">
+        <select id="logLines" style="width:auto">
+          <option value="200">最近 200 行</option>
+          <option value="500" selected>最近 500 行</option>
+          <option value="1000">最近 1000 行</option>
+          <option value="2000">最近 2000 行</option>
+        </select>
+        <button id="btnLogRefresh" type="button">刷新</button>
+      </div>
+    </div>
+    <div class="hint" id="logPath">日志文件：—</div>
+    <pre id="logBox">尚未读取</pre>
+    <div class="notes">
+      · 只读最近若干行（上限 2000）；要看更早的，按上面的路径直接用文本编辑器打开。<br>
+      · <b>进入本页时自动读取一次，之后不自动刷新</b> —— 每 15 秒重画会把正在看的位置顶走，
+      需要最新内容就点「刷新」。<br>
+      · 每轮扫描、每条告警、每次推送失败与重试都记在这里。排查「为什么没收到通知」
+      先看这个页面，比猜快得多。
+    </div>
   </div>
 </section>
 </div>
@@ -1249,6 +1272,7 @@ function render(d){
   mMode.style.color = modeSet ? '' : 'var(--danger)';
   $('modeWarn').style.display = modeSet ? 'none' : 'block';
   $('rootErr').textContent = d.error ? ('⚠ ' + d.error) : '';
+  if (d.paths && d.paths.log) $('logPath').textContent = '日志文件：' + d.paths.log;
   renderChannels(d);
   if (d.backup) renderBackupStat(d.backup);
   if (d.config && !cfgDirty) fillConfig(d.config);
@@ -1361,17 +1385,21 @@ $('btnSave').onclick = async () => {
   } finally { btn.disabled = false; }
 };
 
+/* 日志页（v1.1.9）：原来是配置页里藏起来的一块，靠「查看日志」按钮展开。
+   独立成页后不自动刷新 —— 15 秒重画一次会把正在看的位置顶走。 */
 async function loadLogs(){
-  $('logCard').style.display = 'block';
+  const box = $('logBox');
+  const n = parseInt($('logLines').value, 10) || 500;
+  box.textContent = '读取中…';
   try {
-    const d = await call('logs', {lines: 200});
-    $('logBox').textContent = d.text || '（空）';
+    const d = await call('logs', {lines: n});
+    box.textContent = d.text || '（空）';
   } catch (e) {
-    $('logBox').textContent = '读取失败：' + e.message;
+    box.textContent = '读取失败：' + e.message;
   }
 }
-$('btnLogs').onclick = loadLogs;
 $('btnLogRefresh').onclick = loadLogs;
+$('logLines').onchange = loadLogs;
 
 $('btnDoctor').onclick = async () => {
   const btn = $('btnDoctor'); btn.disabled = true;
@@ -1588,6 +1616,7 @@ function showPage(name, animate){
   /* 概览页才拉统计数据，配置页不白扫一遍盘 */
   if (name === 'overview') loadStats(animate !== false);
   if (name === 'backup') loadBackups();
+  if (name === 'log') loadLogs();
 }
 
 document.querySelectorAll('#tabs .tab').forEach(t => {
@@ -1599,7 +1628,7 @@ document.querySelectorAll('#tabs .tab').forEach(t => {
 document.addEventListener('keydown', e => {
   if (e.target && /input|textarea|select/i.test(e.target.tagName)) return;
   if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-  const order = ['overview', 'config', 'backup'];
+  const order = ['overview', 'config', 'backup', 'log'];
   const i = order.indexOf(curPage);
   const next = order[(i + (e.key === 'ArrowRight' ? 1 : order.length - 1)) % order.length];
   if (next !== curPage) showPage(next);
@@ -1623,7 +1652,7 @@ setTheme(document.documentElement.getAttribute('data-theme') || 'light');
 /* 启动：恢复上次所在的页（没记录就概览） */
 let startPage = 'overview';
 try { startPage = localStorage.getItem('erm.page') || 'overview'; } catch (e) {}
-if (!['overview', 'config', 'backup'].includes(startPage)) startPage = 'overview';
+if (!['overview', 'config', 'backup', 'log'].includes(startPage)) startPage = 'overview';
 
 load();
 showPage(startPage, true);

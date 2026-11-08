@@ -1144,6 +1144,18 @@ def test_ui_shell():
 
     ok("@media (prefers-reduced-motion: reduce)" in html, "尊重系统「减少动态效果」")
 
+    # ④ v1.1.9：日志独立成页 —— 原先藏在配置页里，点「查看日志」才展开一块卡片
+    ok('id="page-log"' in html, "UI：有日志页容器")
+    eq(html.count('data-page="log"'), 1, "导航项「日志」唯一")
+    ok(html.index('id="page-backup"') < html.index('id="page-log"'),
+       "UI：日志页排在备份页之后")
+    ok(html.index('id="page-log"') < html.index('id="logBox"'),
+       "UI：日志内容在日志页内")
+    ok('id="btnLogs"' not in html, "UI：配置页不再有「查看日志」按钮")
+    ok('id="logCard"' not in html, "UI：日志不再是被 display:none 藏起来的卡片")
+    ok("if (name === 'log') loadLogs();" in html, "UI：切到日志页才读日志（不占其它页开销）")
+    ok("$('logLines').onchange = loadLogs;" in html, "UI：日志行数可切换（200~2000）")
+
 
 def test_backup():
     """备份（v1.1.0）：落盘、列表、按份数清理、恢复、拒绝路径穿越、定时到点判定。"""
@@ -1230,9 +1242,9 @@ def test_backup():
     html = open(os.path.join(APP, "www", "index.html"), encoding="utf-8").read()
     ok('id="page-backup"' in html, "UI：有备份页容器")
     ok('data-page="backup"' in html, "UI：有备份页签")
-    ok("'overview', 'config', 'backup'" in html, "UI：键盘切页顺序包含备份")
-    ok("#page-config,#page-backup,#page-overview{max-width:1080px" in html,
-       "UI：备份页与另两页同宽（1080）")
+    ok("'overview', 'config', 'backup', 'log'" in html, "UI：键盘切页顺序包含备份与日志")
+    ok("#page-config,#page-backup,#page-log,#page-overview{max-width:1080px" in html,
+       "UI：备份页 / 日志页与另两页同宽（1080）")
     ok('id="btnBkImport"' in html, "UI：有「导入备份」按钮")
     ok('data-act="export"' in html, "UI：备份记录每行有「导出」按钮")
     ok(html.index('data-act="export"') < html.index('data-act="restore"'),

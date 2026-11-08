@@ -29,7 +29,7 @@
       "install_type": "",
       "is_docker": false,
       "service_port": "",
-      "details_updated_at": "2026-11-08T10:25:00+08:00",
+      "details_updated_at": "2026-11-08T10:40:00+08:00",
       "releases": {
         "1.1.4": {
           "changelog": "卸载时可选择「保留现有文件」或「清除所有套件数据文件（不可恢复）」：新增 wizard/uninstall（字段 wizard_delete_data），uninstall_callback 只在明确 true 时清空 @appdata（配置/状态/日志），默认保留；用户自选的备份目录一律不碰。自检 350 项。",
@@ -39,61 +39,6 @@
               "download_url": "https://github.com/st1341815/EasyNVR-RecordAlert/releases/download/v1.1.4/EasyNVR-RecordAlert-1.1.4.fpk",
               "sha256": "fec72be19d8f9dd2957c03da745e8c8592665d1eeeea2462f086ff2bf3a8a96f",
               "size": 97369
-            }
-          }
-        },
-        "1.1.3": {
-          "changelog": "备份记录每行在「恢复」「删除」前新增「导出」：把某一份备份原样存到本地（内容不做重新序列化，字节一致），文件名即备份目录里的名字，导出的文件可用「导入备份」带回来。自检 338 项。",
-          "updated_at": "2026-11-08T09:20:00+08:00",
-          "packages": {
-            "all": {
-              "download_url": "https://github.com/st1341815/EasyNVR-RecordAlert/releases/download/v1.1.3/EasyNVR-RecordAlert-1.1.3.fpk",
-              "sha256": "3e64e9a7c2951fac1f8a878d0c20e295746662457795b6893afa2e5675b5332c",
-              "size": 96033
-            }
-          }
-        },
-        "1.1.2": {
-          "changelog": "备份页新增「导入备份」按钮：选一个 erm-backup-*.json 即可收进当前备份目录（不信任上传文件名，服务端重新生成、权限 0600、时间戳沿用内容里的 created_at）；导入只收不套用，仍需在列表点「恢复」。另加 12 MB 请求体上限。自检 331 项。",
-          "updated_at": "2026-11-08T09:02:00+08:00",
-          "packages": {
-            "all": {
-              "download_url": "https://github.com/st1341815/EasyNVR-RecordAlert/releases/download/v1.1.2/EasyNVR-RecordAlert-1.1.2.fpk",
-              "sha256": "b2443ac3d996a2ac656f2ff0f29d00eac7c77ab9b851c785d28508886b080981",
-              "size": 95110
-            }
-          }
-        },
-        "1.1.1": {
-          "changelog": "备份页宽度收齐到 1080，与概览/配置两页一致：限宽规则漏了 #page-backup，它吃满 1440 而另两页 1080，切页时版面横向跳动。自检 318 项。",
-          "updated_at": "2026-11-08T08:44:00+08:00",
-          "packages": {
-            "all": {
-              "download_url": "https://github.com/st1341815/EasyNVR-RecordAlert/releases/download/v1.1.1/EasyNVR-RecordAlert-1.1.1.fpk",
-              "sha256": "33eb986def8215cd333a400769feffb07cc9bed57208e16b2a3fa1a06aebafc9",
-              "size": 93215
-            }
-          }
-        },
-        "1.1.0": {
-          "changelog": "新增「备份」页（第三个页签）：把 config.json 备份到你自己指定的目录，可手动立即备份，也可按「每天 HH:MM + 星期几」定时执行，只保留最近 N 份，一键恢复（恢复前自动再存一份 pre-restore 快照）。备份内容可选：应用配置（webhook / 摄像头别名 / 阈值全在里面）、运行状态、额外文件（绝对路径，每行一个）。备份是单个 JSON，可直接打开看、直接 diff；不备份日志（几十 MB，恢复它没有意义）。恢复时保留当前备份设置，不会出现「恢复完配置，备份功能自己关了」。顶部导航从两页变三页，← → 切页顺序同步；自检 277 → 309 项。",
-          "updated_at": "2026-11-08T08:12:00+08:00",
-          "packages": {
-            "all": {
-              "download_url": "https://github.com/st1341815/EasyNVR-RecordAlert/releases/download/v1.1.0/EasyNVR-RecordAlert-1.1.0.fpk",
-              "sha256": "f8a4717b0085ea2bbb7e94df2ee79f6e991dabc54115b9ee4892b29f7487b2f4",
-              "size": 93177
-            }
-          }
-        },
-        "1.0.24": {
-          "changelog": "手机端顶栏恢复显示版本号。v1.0.19 把顶栏在手机上折成两行时，为腾地方把 .ver 在 @media (max-width:640px) 里设成 display:none，结果拿手机看页面无法确认加载的是哪一版。现改为 display:inline 并把字号从 11.5px 缩到 10.5px，与标题同行；配套给 .brand 打开 flex-wrap 并留 2px 行距——375px 宽度下标题 + 版本号约 190px、顶栏可用 254px，实测仍在同一行，只有 ≤320px 极窄屏才折行。只改断点内的规则，桌面端常显不受影响。",
-          "updated_at": "2026-11-08T07:37:00+08:00",
-          "packages": {
-            "all": {
-              "download_url": "https://github.com/st1341815/EasyNVR-RecordAlert/releases/download/v1.0.24/EasyNVR-RecordAlert-1.0.24.fpk",
-              "sha256": "6daa1243e0fec59bb905347a1a6b13e7a5d327dcf138765d30bb2272aacbdeb1",
-              "size": 84174
             }
           }
         },
@@ -108,50 +53,6 @@
             }
           }
         },
-        "1.0.22": {
-          "changelog": "热力图铺满卡片宽度并统一字号。① 宽度：原来 table.heat 用 width:auto + td 写死 15px，24 列只有约 481px，在 1046px 的内容区里只占三分之一，右边空一大片；现改为 table 100%、td 不给固定宽由浏览器均分，行标题列 width:1% 让位，实测 1046px 完全铺满且无横向溢出。② 字号：原来热力图 11px / 表头 10.5px / 图例 11.5px，比普通表格（13 / 12px）小一号，看着像另一个组件；现统一到 12.5 / 12 / 12px。③ 铺满后 24 列被拉宽，固定 20px 高会变成扁长条，故单元格高度按行数自适应：≤6 行 30px（单日，行是通道）、≤12 行 24px（近 7 天）、更多 18px（近 30 天）。④ 移动端显式复位 width:auto，保住原来「24 小时 × 7 天整屏放下不用横向拖」的行为。",
-          "updated_at": "2026-11-08T07:18:00+08:00",
-          "packages": {
-            "all": {
-              "download_url": "https://github.com/st1341815/EasyNVR-RecordAlert/releases/download/v1.0.22/EasyNVR-RecordAlert-1.0.22.fpk",
-              "sha256": "58ed9ffe0dfe8ceb88cd88abd8758215f996613b6427268619deeb09e92522ca",
-              "size": 83528
-            }
-          }
-        },
-        "1.0.21": {
-          "changelog": "概览页宽度收到 1080px，与配置页完全一致：v1.0.20 把版面放开到 1440 时只收窄了配置页（表单页，铺满会被 auto-fit 排成 5~6 列细条），概览页仍铺满 1377px，结果两个页签来回切换时内容宽度跳 297px，像换了两个应用。现改为 #page-config,#page-overview 共用 max-width:1080px，两页同宽居中；实测 1440 视口下两页容器均为 1080px、页面无横向滚动，内部元素尺寸不受影响——热力图在 1080 与 1440 下都保持 481px（内容自适应宽度，不随容器拉伸），缩窄只减掉右侧留白。顺带更正 v1.0.20 遗留的「概览页铺满更好看」注释，避免误导。已知遗留：顶栏 .bar-inner 仍为 1440px，宽屏下比内容区宽（配置页自 v1.0.20 起即如此，本次未调整）。",
-          "updated_at": "2026-11-08T07:05:00+08:00",
-          "packages": {
-            "all": {
-              "download_url": "https://github.com/st1341815/EasyNVR-RecordAlert/releases/download/v1.0.21/EasyNVR-RecordAlert-1.0.21.fpk",
-              "sha256": "e39cf909fc32ce6c102fb61415a6b8a382e3f622264aabf847dbc66b465edb27",
-              "size": 82702
-            }
-          }
-        },
-        "1.0.19": {
-          "changelog": "改成两页 + 亮暗双主题。\n\n① 顶部新增常驻导航栏（滚动吸顶）：【概览】打开就是全部统计图表（KPI 六格 / 在线率柱 / 文件数柱 / 热力图 / 通道对比 / 断流清单），不用再往下滚；原来的运行状态、通道状态、配置表单、推送渠道、自检、运行日志全部收进【配置】页。选中哪页会记住。\n② 右上角主题按钮：亮 / 暗一点即换，记在 localStorage；没选过就跟随系统 prefers-color-scheme。深色不是纯黑（背景 #0f1216、卡片 #171b21、描边 #2a3038），品牌绿提亮到 #4f9d80；主题在 <head> 里首帧之前定格，深色用户不会先看到白闪。\n③ 所有颜色收进 CSS 变量（--surface / --track / --heat-0…5 / --ind-bg / --pre-bg 等），热力图六档色阶、柱状图底槽、日志框、消息提示、表单控件全部跟着换肤，没有残留硬编码色；换肤 0.28 秒过渡。\n④ 动效：页签指示条滑动（位置+宽度插值）、页面淡入上浮 8px、KPI 逐格错开 35ms 浮现、柱状图 0.55 秒从底部长出、热力图淡入；只在切页 / 切时间范围时播放，15 秒自动刷新不重播；prefers-reduced-motion 下全部关闭。\n⑤ 手机端（≤640px）顶栏折成两行，热力图格子压到 9px、行标题 8.5px，24 小时×7 天整屏放下不用横向拖；概览页才轮询统计，切到配置页不再请求 stats。顶栏左侧状态圆点：正常绿、异常红并呼吸闪烁。\n\n自检 255 → 277 项（新增 22 项 UI 骨架断言：主题变量亮暗各一份、两页容器、导航唯一性、概览排在配置之前、尊重减少动效）。",
-          "updated_at": "2026-11-07T22:15:25+08:00",
-          "packages": {
-            "all": {
-              "download_url": "https://github.com/st1341815/EasyNVR-RecordAlert/releases/download/v1.0.19/EasyNVR-RecordAlert-1.0.19.fpk",
-              "sha256": "3d11b8baabaed8f77f1434acc230b9ba000bb41d1692257058a44b51cd3d867c",
-              "size": 81350
-            }
-          }
-        },
-        "1.0.18": {
-          "changelog": "新增统计图表页：在线时长、闲置时长、在线率、录像数量、覆盖热力图、通道对比与断流区间清单，时间范围支持今天/昨天/近7天/近30天。\n\n① 数据不靠新增采集库：每个 mp4 的修改时间就是「那一刻在录」的证据，统计直接从磁盘反推——升级完马上能看到过去几十天的图，不用先跑几天；不新增数据库、不占空间、不和 state.json 抢写。\n② 五张图：在线率堆叠柱、录像文件数柱（与上面同一套横轴桶，严格对齐）、覆盖热力图（多日视图 天×小时 / 单日视图 通道×小时，每格是该小时的录像覆盖比例）、通道在线率横条、断流区间清单（起止时间 + 时长，倒序最多 30 条）。\n③ 六格 KPI：在线时长、闲置时长、在线率、录像文件数、最长连续录像、最长断流。\n④ 口径写死并自检：在线 = 相邻录像间隔不超过 5 分钟（与状态页「在线时长」同一口径）；段时长 = 末−首 + 一个「片段时长」（段内相邻间隔中位数，clamp 10–3600 秒，兜底 60），所以 60 个一分钟切片正好算成 3600 秒、孤立单文件也不会算成 0；闲置 = 窗口 − 在线；断流不把「窗口开头到第一个录像」算进去（避免把没装摄像头的日子记成断流）；跨通道汇总一律取每通道平均，不会把 10 个通道叠成 240 小时。\n⑤ 性能：按 (目录, 后缀) 缓存 mtime，TTL 120 秒，页面 15 秒刷一次但实际两分钟才真扫一次盘。\n⑥ 顺手修：页面 15 秒自动刷新不再覆盖正在填写的配置。\n\n自检 209 → 255 项；邮件专项 62 项。",
-          "updated_at": "2026-11-07T20:31:00+08:00",
-          "packages": {
-            "all": {
-              "download_url": "https://github.com/st1341815/EasyNVR-RecordAlert/releases/download/v1.0.18/EasyNVR-RecordAlert-1.0.18.fpk",
-              "sha256": "aeb0f0c5f06a8d9c3bfd489a6ff2ad1f6731857b2180b4da3b55bfdecdb6b2c0",
-              "size": 77451
-            }
-          }
-        },
         "1.0.17": {
           "changelog": "本次一起交付两个版本的内容。\n\n【1.0.16 日报统计区间 + 推送计划】\n① 日报「统计区间」可自定义：HH:MM 含端点、起>止可跨天（08:00—08:00 = 24 小时），统计「最近一个已结束的完整区间」，正文改写为「统计区间：11-03 08:00 — 11-04 08:00」；默认 00:00—23:59 等价旧的「昨天整天」，升级后日报内容不变。\n② 新增「告警推送计划」：勾星期 + 起止时段（默认每天 全天）。时段外只检测不推送，且不推进告警状态——夜里断流不会被静默吃掉，进时段第一轮立刻补发；支持跨夜 22:00—07:00 与「起止相同 = 全天」，18:00 端点算在内；页面「立即检测」默认绕过计划强制发。\n③ 日报有独立推送日，不受告警时段影响。④ 日报设置移到「推送渠道」卡片，一起保存。\n⑤ 推送日空选或全非法 → 回落「每天」，绝不让一次漏勾变成永久静默；「补发昨日日报」改名「补发最近一期日报」。\n\n【1.0.17 修界面折行】\n「推送日 一~日」不再折成两行：推送时间输入框收窄到 9em（约 126px），两组「推送日」独占整行且勾选项 nowrap；375 / 560 / 700 / 768 / 900 / 1100 / 1440 px 七档宽度实测单行、无横向溢出。\n\n自检 164 → 209 项；邮件专项 62 项；端到端全绿。",
           "updated_at": "2026-11-04T13:47:00+08:00",
@@ -160,17 +61,6 @@
               "download_url": "https://github.com/st1341815/EasyNVR-RecordAlert/releases/download/v1.0.17/EasyNVR-RecordAlert-1.0.17.fpk",
               "sha256": "013911d134d213ae515dd528848c7f143f251030eb2e9bc9c815d60569f46020",
               "size": 67455
-            }
-          }
-        },
-        "1.0.15": {
-          "changelog": "日报增加开关并支持时间自定义：配置页「每日日报」新增启用勾选框，取消后不再自动推送，时间输入框置灰但值保留；指标区「下次日报」显示「已关闭」而不是假时间。关闭期间不写 last_report_day，重新打开后当天到点仍会补发（不会白丢一天）；页面「补发昨日日报」按钮不受开关限制，随时可手动发。日报时间支持本地时区任意 HH:MM（如 06:30 / 23:45），到点即发、当天只发一次，重启或 NAS 睡眠错过也会当天补发；「整点 + 飞书」的错峰提示只在日报启用时出现。旧配置没有该键时默认启用，升级后行为不变；安装向导新增 wizard_daily_report_enabled=1|0。",
-          "updated_at": "2026-11-04T12:40:00+08:00",
-          "packages": {
-            "all": {
-              "download_url": "https://github.com/st1341815/EasyNVR-RecordAlert/releases/download/v1.0.15/EasyNVR-RecordAlert-1.0.15.fpk",
-              "sha256": "c305e1da1123fd845da56ba269de10a17fd34b6f64c5891c0161bac7607a3206",
-              "size": 62635
             }
           }
         },

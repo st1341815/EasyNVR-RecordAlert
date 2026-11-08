@@ -1056,6 +1056,9 @@ def test_backup():
     ok("#page-config,#page-backup,#page-overview{max-width:1080px" in html,
        "UI：备份页与另两页同宽（1080）")
     ok('id="btnBkImport"' in html, "UI：有「导入备份」按钮")
+    ok('data-act="export"' in html, "UI：备份记录每行有「导出」按钮")
+    ok(html.index('data-act="export"') < html.index('data-act="restore"'),
+       "UI：「导出」排在「恢复」之前")
 
     # ⑧ 导入：校验内容、不认上传的文件名、时间戳沿用内容里的 created_at
     icfg = C.normalize({"backup_dir": str(bkdir), "backup_keep": 0})
@@ -1089,6 +1092,14 @@ def test_backup():
 
     # ⑨ 导入进来的备份能被 restore 直接吃（文件名合 NAME_RE，恢复链路不用特判）
     ok(bool(B.NAME_RE.match(r3["file"])), "导入：生成的文件名符合恢复/删除的命名规则")
+
+    # ⑩ 导出：给的是磁盘原文（不重新序列化），非法名 / 不存在的拒绝
+    exp = B.export_text(icfg, r3["file"])
+    ok(exp["ok"], "导出：能读到备份原文", exp)
+    eq(exp["content"], p3.read_text(encoding="utf-8"), "导出：内容与磁盘文件逐字一致")
+    eq(exp["size"], p3.stat().st_size, "导出：大小与磁盘一致")
+    ok(not B.export_text(icfg, "../x.json")["ok"], "导出：拒绝非法文件名")
+    ok(not B.export_text(icfg, "erm-backup-20000101-000000.json")["ok"], "导出：不存在时拒绝")
 
 
 def main():

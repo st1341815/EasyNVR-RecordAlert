@@ -489,6 +489,31 @@ def remove(cfg, name):
     return {"ok": True, "deleted": name}
 
 
+def export_text(cfg, name):
+    """读出一份备份的原文，交给浏览器存成本地文件。
+
+    不重新序列化：导出的字节和磁盘上那份完全一致 —— 拿去 diff、再导回来、
+    或者贴给别人排查，都不会因为重新排版看出假差异。
+    """
+    ok, detail = dir_status(cfg, create=False)
+    if not ok:
+        return {"ok": False, "error": detail}
+    name = str(name or "").strip()
+    if not NAME_RE.match(name):
+        return {"ok": False, "error": "备份文件名不合法"}
+    p = Path(detail) / name
+    if not p.is_file():
+        return {"ok": False, "error": "备份不存在：%s" % name}
+    try:
+        size = p.stat().st_size
+        if size > MAX_IMPORT_BYTES:
+            return {"ok": False, "error": "文件太大（%s），不通过页面导出" % _hsize(size)}
+        text = p.read_text(encoding="utf-8")
+    except Exception as e:
+        return {"ok": False, "error": "读不出来：%s" % e}
+    return {"ok": True, "file": name, "content": text, "size": size}
+
+
 # ------------------------------------------------------------------ 定时
 
 def backup_due(cfg, state=None, now=None):

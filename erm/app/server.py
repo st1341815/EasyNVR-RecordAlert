@@ -30,7 +30,7 @@ from urllib.parse import parse_qs, urlparse
 
 APP_NAME = "erm"
 GATEWAY_PREFIX = "/app/" + APP_NAME
-VERSION = "1.1.2"
+VERSION = "1.1.3"
 # 请求体上限：导入备份是唯一的大请求（备份文件正常十几 KB）。
 # 超限在读完之前就拒绝，别把几百 MB 先读进内存再报错。
 MAX_BODY_BYTES = 12 * 1024 * 1024
@@ -378,6 +378,14 @@ def handle_action(body, query):
         res = B.remove(get_cfg(), str(body.get("file") or ""))
         out = status_payload()
         out["deleted"] = res
+        return out
+
+    if act == "backup_export":
+        # 返回原文，前端用 Blob 落成本地文件。走 JSON 通道而不是让浏览器直接下载，
+        # 是因为所有请求都过飞牛网关的 unix socket，附件响应容易被网关改写。
+        res = B.export_text(get_cfg(), str(body.get("file") or ""))
+        out = status_payload() if not res.get("ok") else {"ok": True}
+        out["exported"] = res
         return out
 
     if act == "backup_import":

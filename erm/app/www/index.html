@@ -754,7 +754,9 @@
         · 恢复前会自动再存一份 <code>pre-restore</code> 快照，点错了还能退回去。<br>
         · <b>导入备份</b>：换机、重装、或从别的目录捞回一份 <code>erm-backup-*.json</code>，
         点「导入备份」选文件即可收进当前备份目录；<b>导入不会自动套用</b>，
-        还要在下面列表里点该行的「恢复」才生效。
+        还要在下面列表里点该行的「恢复」才生效。<br>
+        · <b>导出</b>：把某一份备份存到本地（文件名就是备份目录里那个名字，内容原样不改），
+        换机前留档、发给别人排查都行；导出的文件用「导入备份」能原样带回来。
       </div>
     </div>
   </form>
@@ -1002,17 +1004,42 @@ async function loadBackups(){
         '<td class="num" data-label="大小">' + fmtSize(r.size) + '</td>' +
         '<td data-label="内容">' + esc((r.items || []).join('、') || '—') + '</td>' +
         '<td class="ops" data-label="操作">' +
+          '<button type="button" data-act="export" data-file="' + esc(r.file) + '">导出</button>' +
           '<button type="button" data-act="restore" data-file="' + esc(r.file) + '">恢复</button>' +
           '<button type="button" data-act="delete" data-file="' + esc(r.file) + '">删除</button>' +
         '</td></tr>';
     }
     box.innerHTML = html + '</tbody></table>';
     box.querySelectorAll('button[data-act]').forEach(b => {
-      b.onclick = () => (b.dataset.act === 'restore' ? doRestore(b) : doDelete(b));
+      b.onclick = () => (b.dataset.act === 'export' ? doExport(b)
+                       : b.dataset.act === 'restore' ? doRestore(b) : doDelete(b));
     });
   } catch (e) {
     box.innerHTML = '<div class="empty">读取备份列表失败：' + esc(e.message) + '</div>';
   }
+}
+
+async function doExport(btn){
+  const file = btn.dataset.file;
+  btn.disabled = true;
+  try {
+    const d = await call('backup_export', {file});
+    const e = d.exported || {};
+    if (!e.ok) throw new Error(e.error || '导出失败');
+    /* 服务端给的是磁盘上的原文，这里原样存下来，不做任何重新排版 */
+    const blob = new Blob([e.content], {type: 'application/json;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = e.file || file;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    showMsg($('bkMsg'), '已导出 ' + a.download + '（' + fmtSize(e.size) + '）', 'ok');
+  } catch (err) {
+    showMsg($('bkMsg'), '导出失败：' + err.message, 'bad');
+  } finally { btn.disabled = false; }
 }
 
 async function doRestore(btn){

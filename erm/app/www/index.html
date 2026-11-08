@@ -147,6 +147,18 @@
   .checks{display:flex;gap:16px;flex-wrap:wrap;margin-top:6px}
   .checks label{display:flex;align-items:center;gap:6px;margin:0;color:var(--ink);font-size:13px}
   .push-field[hidden]{display:none}
+  /* ---------- 备份页（v1.1.0） ---------- */
+  table.bk td.c-name{font-weight:600;font-variant-numeric:tabular-nums}
+  table.bk td.ops{text-align:right}
+  table.bk .ops button{padding:3px 9px;font-size:12px;border-radius:6px}
+  table.bk .ops button + button{margin-left:6px}
+  .switch{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink);margin-bottom:14px}
+  .switch input{width:16px;height:16px;margin:0;flex:0 0 auto}
+  .bk-stat{display:flex;gap:8px 20px;flex-wrap:wrap;font-size:12.5px;
+           color:var(--muted);margin:0 0 4px}
+  .bk-stat b{color:var(--ink);font-weight:600}
+  .bk-dir{font-size:12px;color:var(--muted);margin-top:8px}
+  .bk-dir.bad{color:var(--danger)}
   /* 端口 + 加密方式 同一行：inline-flex 保证不换行；中文 label 已在上方单独一行 */
   .inline-group{display:flex;gap:8px;align-items:center;flex-wrap:nowrap}
   .inline-group input[type=number]{width:6.5em;flex:0 0 auto}
@@ -285,6 +297,17 @@
     table.chan td.c-dir{color:var(--muted);font-size:12.5px}
     /* 目录与通道相同时（无别名）手机上不占一行 */
     table.chan td.c-dir:empty,.chan td.c-dir[data-same="1"]{display:none}
+    /* 备份记录表 → 一条备份一张小卡（跟通道表同一套思路） */
+    table.bk thead{display:none}
+    table.bk tr{display:block;padding:10px 2px 12px;border-bottom:1px solid var(--line-soft)}
+    table.bk tr:last-child{border-bottom:0}
+    table.bk td{display:flex;justify-content:space-between;align-items:baseline;gap:14px;
+                padding:3px 0;border:0;white-space:normal;word-break:break-word;text-align:right}
+    table.bk td::before{content:attr(data-label);color:var(--muted);font-size:12.5px;
+                        flex:0 0 auto;text-align:left}
+    table.bk td.c-name{font-weight:650;font-size:13.5px;text-align:left;padding-bottom:6px}
+    table.bk td.c-name::before{content:none}
+    table.bk td.ops{justify-content:flex-end;padding-top:8px}
     /* 表单与按钮 */
     .grid{grid-template-columns:1fr !important}
     /* 手机端推送日独占一行，7 个「一~日」压缩间距也要保持单行 */
@@ -339,6 +362,8 @@
               aria-selected="true" aria-controls="page-overview">概览</button>
       <button class="tab" type="button" data-page="config" role="tab"
               aria-selected="false" aria-controls="page-config">配置</button>
+      <button class="tab" type="button" data-page="backup" role="tab"
+              aria-selected="false" aria-controls="page-backup">备份</button>
     </nav>
     <div class="tb-right">
       <span class="pill" id="statePill">加载中…</span>
@@ -661,12 +686,103 @@
     <pre id="logBox">—</pre>
   </div>
 </section>
+
+<section class="page page-pad" id="page-backup">
+  <form id="bkForm" onsubmit="return false">
+    <div class="card">
+      <h2>备份设置</h2>
+      <label class="switch">
+        <input type="checkbox" id="backup_enabled"> 启用定时备份
+      </label>
+      <div class="grid">
+        <div>
+          <label>备份目录（绝对路径）</label>
+          <input type="text" id="backup_dir" placeholder="/vol3/1000/backup/erm">
+        </div>
+        <div>
+          <label>备份时间</label>
+          <input type="time" id="backup_time">
+        </div>
+        <div>
+          <label>保留份数（0 = 不清理）</label>
+          <input type="number" id="backup_keep" min="0" max="999">
+        </div>
+      </div>
+
+      <div style="margin-top:12px">
+        <label>备份日</label>
+        <div class="weekdays" id="backupWeekdays">
+          <label><input type="checkbox" data-d="1">一</label>
+          <label><input type="checkbox" data-d="2">二</label>
+          <label><input type="checkbox" data-d="3">三</label>
+          <label><input type="checkbox" data-d="4">四</label>
+          <label><input type="checkbox" data-d="5">五</label>
+          <label><input type="checkbox" data-d="6">六</label>
+          <label><input type="checkbox" data-d="7">日</label>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button type="button" class="mini" data-preset="backupWeekdays" data-days="1234567">每天</button>
+        <button type="button" class="mini" data-preset="backupWeekdays" data-days="12345">工作日</button>
+        <button type="button" class="mini" data-preset="backupWeekdays" data-days="67">周末</button>
+      </div>
+
+      <div class="checks" style="margin-top:14px">
+        <label><input type="checkbox" id="backup_include_config"> 应用配置（推送渠道 / 别名 / 阈值）</label>
+        <label><input type="checkbox" id="backup_include_state"> 运行状态（告警记录）</label>
+      </div>
+
+      <div style="margin-top:14px">
+        <label>额外备份文件（每行一个绝对路径，可留空）</label>
+        <textarea id="backup_extra_files" rows="3"
+                  placeholder="/vol1/1000/docs/notes.json&#10;/vol1/@appdata/其他应用/config.json"></textarea>
+      </div>
+
+      <div class="row" style="margin-top:14px">
+        <button class="primary" type="button" id="btnSaveBackup">保存备份设置</button>
+        <span class="hint" style="margin:0">保存后由后台线程按时间执行，不用重启</span>
+      </div>
+      <div class="msg" id="bkSaveMsg"></div>
+
+      <div class="notes">
+        · 备份是一个 JSON 文件，里面装 <code>config.json</code>——webhook、摄像头别名、阈值、日报时间全在它里面；
+        通常十几 KB，可以直接打开看，也可以直接 diff。<br>
+        · <b>不备份日志</b>：日志是排障用的过程文件，几十 MB，恢复它反而会把当前日志糊掉。<br>
+        · 目录要放在应用能写的卷上（如 <code>/vol3/1000/...</code>）；第一次备份会自动创建。<br>
+        · 恢复时会<b>保留当前的备份设置</b>，只回退业务配置——不会出现「恢复完配置，备份功能自己关了」。<br>
+        · 恢复前会自动再存一份 <code>pre-restore</code> 快照，点错了还能退回去。
+      </div>
+    </div>
+  </form>
+
+  <div class="card">
+    <div class="bk-stat">
+      <span>上次备份 <b id="bkLast">—</b></span>
+      <span>下次备份 <b id="bkNext">—</b></span>
+      <span>共 <b id="bkCount">0</b> 份</span>
+      <span>保留 <b id="bkKeepTxt">—</b></span>
+    </div>
+    <div class="bk-dir" id="bkDir"></div>
+    <div class="row" style="margin-top:12px">
+      <button class="primary" type="button" id="btnBackupNow">立即备份</button>
+      <button type="button" id="btnBkRefresh">刷新列表</button>
+    </div>
+    <div class="msg" id="bkMsg"></div>
+  </div>
+
+  <div class="card">
+    <h2>备份记录</h2>
+    <div id="bkBox"><div class="empty">还没有备份</div></div>
+  </div>
+</section>
 </div>
 
 <script>
 const API = '/app/erm/api';
 /* 15 秒自动刷新会把用户正在编辑的配置冲掉 —— 编辑过就不再回填，保存成功后复位 */
 let cfgDirty = false;
+/* 备份页单独一个脏标记：两个页面各有各的输入，互不干扰 */
+let bkDirty = false;
 const $ = id => document.getElementById(id);
 
 async function call(action, extra) {
@@ -815,7 +931,165 @@ function fillConfig(cfg){
   $('ch_email').checked = on.includes('email');
   $('notify_recovery').checked = !!cfg.notify_recovery;
   syncPushFields();
+  if (!bkDirty) fillBackup(cfg);
 }
+
+/* ---------- 备份页（v1.1.0）---------- */
+function fillBackup(cfg){
+  const set = (id, v) => { const el = $(id); if (el) el.value = v == null ? '' : v; };
+  $('backup_enabled').checked = !!cfg.backup_enabled;
+  set('backup_dir', cfg.backup_dir);
+  set('backup_time', cfg.backup_time || '03:00');
+  set('backup_keep', cfg.backup_keep == null ? 30 : cfg.backup_keep);
+  setWeekdays('backupWeekdays', cfg.backup_weekdays || [1,2,3,4,5,6,7]);
+  $('backup_include_config').checked = cfg.backup_include_config !== false;
+  $('backup_include_state').checked = !!cfg.backup_include_state;
+  set('backup_extra_files', (cfg.backup_extra_files || []).join('\n'));
+}
+
+function fmtSize(n){
+  n = Number(n || 0);
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+const BK_KIND = {'scheduled': '定时', 'pre-restore': '恢复前快照', 'manual': '手动'};
+
+function renderBackupStat(bk){
+  if (!bk) return;
+  $('bkLast').textContent = bk.last_str || '—';
+  $('bkNext').textContent = bk.enabled ? (bk.next_str || '—') : '未启用';
+  $('bkCount').textContent = bk.count || 0;
+  $('bkKeepTxt').textContent = bk.keep ? (bk.keep + ' 份') : '不清理';
+  const dir = $('bkDir');
+  if (!bk.dir) {
+    dir.className = 'bk-dir bad';
+    dir.textContent = '还没设置备份目录';
+  } else {
+    dir.className = 'bk-dir' + (bk.dir_ok ? '' : ' bad');
+    dir.textContent = '目录：' + bk.dir + (bk.dir_ok ? '' : '（' + (bk.dir_msg || '不可用') + '）');
+  }
+}
+
+async function loadBackups(){
+  const box = $('bkBox');
+  if (!box) return;
+  try {
+    const d = await call('backup_list');
+    const rows = d.rows || [];
+    if (!rows.length) {
+      box.innerHTML = '<div class="empty">' + esc(
+        !d.dir ? '先在上面填「备份目录」并保存，再点「立即备份」'
+               : (d.dir_ok ? '还没有备份，点「立即备份」生成第一份'
+                           : '目录不可用：' + (d.dir_msg || d.dir))) + '</div>';
+      return;
+    }
+    let html = '<table class="bk"><thead><tr><th>时间</th><th>类型</th><th>大小</th>' +
+               '<th>内容</th><th>操作</th></tr></thead><tbody>';
+    for (const r of rows) {
+      const kind = BK_KIND[r.reason] || (r.reason || '手动');
+      html += '<tr>' +
+        '<td class="c-name" data-label="">' + esc(r.time_str) + '</td>' +
+        '<td data-label="类型"><span class="tag ' +
+            (r.reason === 'pre-restore' ? 'mid' : 'ok') + '">' + esc(kind) + '</span></td>' +
+        '<td class="num" data-label="大小">' + fmtSize(r.size) + '</td>' +
+        '<td data-label="内容">' + esc((r.items || []).join('、') || '—') + '</td>' +
+        '<td class="ops" data-label="操作">' +
+          '<button type="button" data-act="restore" data-file="' + esc(r.file) + '">恢复</button>' +
+          '<button type="button" data-act="delete" data-file="' + esc(r.file) + '">删除</button>' +
+        '</td></tr>';
+    }
+    box.innerHTML = html + '</tbody></table>';
+    box.querySelectorAll('button[data-act]').forEach(b => {
+      b.onclick = () => (b.dataset.act === 'restore' ? doRestore(b) : doDelete(b));
+    });
+  } catch (e) {
+    box.innerHTML = '<div class="empty">读取备份列表失败：' + esc(e.message) + '</div>';
+  }
+}
+
+async function doRestore(btn){
+  const file = btn.dataset.file;
+  if (!confirm('用这份备份覆盖当前配置？\n\n' + file +
+               '\n\n当前配置会先自动存成一份「恢复前快照」，点错了还能退回去。')) return;
+  btn.disabled = true;
+  try {
+    const d = await call('backup_restore', {file});
+    const r = d.restore || {};
+    if (!r.ok) throw new Error(r.error || '恢复失败');
+    cfgDirty = false;
+    bkDirty = false;
+    render(d);
+    showMsg($('bkMsg'), '已恢复 ' + ((r.restored_files || []).join('、') || 'config.json') +
+            (r.pre_backup ? '；恢复前的配置存为 ' + r.pre_backup : '') +
+            ((r.warnings || []).length ? '\n注意：\n· ' + r.warnings.join('\n· ') : ''), 'ok');
+    loadBackups();
+  } catch (e) {
+    showMsg($('bkMsg'), '恢复失败：' + e.message, 'bad');
+  } finally { btn.disabled = false; }
+}
+
+async function doDelete(btn){
+  const file = btn.dataset.file;
+  if (!confirm('删除这份备份？\n\n' + file + '\n\n删除后无法恢复。')) return;
+  btn.disabled = true;
+  try {
+    const d = await call('backup_delete', {file});
+    if (d.deleted && d.deleted.ok === false) throw new Error(d.deleted.error || '删除失败');
+    render(d);
+    showMsg($('bkMsg'), '已删除 ' + file, 'ok');
+    loadBackups();
+  } catch (e) {
+    showMsg($('bkMsg'), '删除失败：' + e.message, 'bad');
+  } finally { btn.disabled = false; }
+}
+
+$('bkForm').addEventListener('input', () => { bkDirty = true; });
+$('bkForm').addEventListener('change', () => { bkDirty = true; });
+
+$('btnSaveBackup').onclick = async () => {
+  const cfg = {
+    backup_enabled: $('backup_enabled').checked,
+    backup_dir: $('backup_dir').value.trim(),
+    backup_time: $('backup_time').value || '03:00',
+    backup_weekdays: getWeekdays('backupWeekdays'),
+    backup_keep: $('backup_keep').value === '' ? 30 : $('backup_keep').value,
+    backup_include_config: $('backup_include_config').checked,
+    backup_include_state: $('backup_include_state').checked,
+    backup_extra_files: $('backup_extra_files').value
+      .split('\n').map(s => s.trim()).filter(Boolean)
+  };
+  const btn = $('btnSaveBackup'); btn.disabled = true;
+  try {
+    const d = await call('save_config', {config: cfg});
+    bkDirty = false;
+    render(d);
+    const w = d.warnings || [];
+    showMsg($('bkSaveMsg'), '已保存。' + (w.length ? '\n注意：\n· ' + w.join('\n· ') : ''),
+            w.length ? 'warn' : 'ok');
+  } catch (e) {
+    showMsg($('bkSaveMsg'), '保存失败：' + e.message, 'bad');
+  } finally { btn.disabled = false; }
+};
+
+$('btnBackupNow').onclick = async () => {
+  const btn = $('btnBackupNow'); btn.disabled = true;
+  try {
+    const d = await call('backup_now');
+    const r = d.backup_result || {};
+    if (!r.ok) throw new Error(r.error || '备份失败');
+    render(d);
+    showMsg($('bkMsg'), '已备份 ' + r.file + '（' + fmtSize(r.size) + '）' +
+            ((r.removed || []).length ? '\n按保留份数清理了 ' + r.removed.length + ' 份旧备份' : '') +
+            ((r.warnings || []).length ? '\n跳过：\n· ' + r.warnings.join('\n· ') : ''), 'ok');
+    loadBackups();
+  } catch (e) {
+    showMsg($('bkMsg'), '备份失败：' + e.message, 'bad');
+  } finally { btn.disabled = false; }
+};
+
+$('btnBkRefresh').onclick = () => loadBackups();
 
 function render(d){
   $('ver').textContent = 'v' + (d.version || '—');
@@ -838,6 +1112,7 @@ function render(d){
   $('mLayout').textContent = (LAY[d.layout] || d.layout || '—') + '·' + (d.channel_count || 0) + ' 个通道';
   $('rootErr').textContent = d.error ? ('⚠ ' + d.error) : '';
   renderChannels(d);
+  if (d.backup) renderBackupStat(d.backup);
   if (d.config && !cfgDirty) fillConfig(d.config);
 }
 
@@ -1162,6 +1437,7 @@ function showPage(name, animate){
   try { localStorage.setItem('erm.page', name); } catch (e) {}
   /* 概览页才拉统计数据，配置页不白扫一遍盘 */
   if (name === 'overview') loadStats(animate !== false);
+  if (name === 'backup') loadBackups();
 }
 
 document.querySelectorAll('#tabs .tab').forEach(t => {
@@ -1173,7 +1449,7 @@ document.querySelectorAll('#tabs .tab').forEach(t => {
 document.addEventListener('keydown', e => {
   if (e.target && /input|textarea|select/i.test(e.target.tagName)) return;
   if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-  const order = ['overview', 'config'];
+  const order = ['overview', 'config', 'backup'];
   const i = order.indexOf(curPage);
   const next = order[(i + (e.key === 'ArrowRight' ? 1 : order.length - 1)) % order.length];
   if (next !== curPage) showPage(next);
@@ -1197,7 +1473,7 @@ setTheme(document.documentElement.getAttribute('data-theme') || 'light');
 /* 启动：恢复上次所在的页（没记录就概览） */
 let startPage = 'overview';
 try { startPage = localStorage.getItem('erm.page') || 'overview'; } catch (e) {}
-if (startPage !== 'overview' && startPage !== 'config') startPage = 'overview';
+if (!['overview', 'config', 'backup'].includes(startPage)) startPage = 'overview';
 
 load();
 showPage(startPage, true);

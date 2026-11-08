@@ -29,8 +29,19 @@
       "install_type": "",
       "is_docker": false,
       "service_port": "",
-      "details_updated_at": "2026-11-08T07:37:00+08:00",
+      "details_updated_at": "2026-11-08T08:12:00+08:00",
       "releases": {
+        "1.1.0": {
+          "changelog": "新增「备份」页（第三个页签）：把 config.json 备份到你自己指定的目录，可手动立即备份，也可按「每天 HH:MM + 星期几」定时执行，只保留最近 N 份，一键恢复（恢复前自动再存一份 pre-restore 快照）。备份内容可选：应用配置（webhook / 摄像头别名 / 阈值全在里面）、运行状态、额外文件（绝对路径，每行一个）。备份是单个 JSON，可直接打开看、直接 diff；不备份日志（几十 MB，恢复它没有意义）。恢复时保留当前备份设置，不会出现「恢复完配置，备份功能自己关了」。顶部导航从两页变三页，← → 切页顺序同步；自检 277 → 309 项。",
+          "updated_at": "2026-11-08T08:12:00+08:00",
+          "packages": {
+            "all": {
+              "download_url": "https://github.com/st1341815/EasyNVR-RecordAlert/releases/download/v1.1.0/EasyNVR-RecordAlert-1.1.0.fpk",
+              "sha256": "f8a4717b0085ea2bbb7e94df2ee79f6e991dabc54115b9ee4892b29f7487b2f4",
+              "size": 93177
+            }
+          }
+        },
         "1.0.24": {
           "changelog": "手机端顶栏恢复显示版本号。v1.0.19 把顶栏在手机上折成两行时，为腾地方把 .ver 在 @media (max-width:640px) 里设成 display:none，结果拿手机看页面无法确认加载的是哪一版。现改为 display:inline 并把字号从 11.5px 缩到 10.5px，与标题同行；配套给 .brand 打开 flex-wrap 并留 2px 行距——375px 宽度下标题 + 版本号约 190px、顶栏可用 254px，实测仍在同一行，只有 ≤320px 极窄屏才折行。只改断点内的规则，桌面端常显不受影响。",
           "updated_at": "2026-11-08T07:37:00+08:00",

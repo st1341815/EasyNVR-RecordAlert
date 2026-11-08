@@ -12,3 +12,5 @@ venv/
 .env
 *.log
 /tmp/
+# 发布前从真机捞回来的 config.json 快照（含 webhook / 授权码），绝不入库
+backups/

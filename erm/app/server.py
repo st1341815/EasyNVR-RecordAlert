@@ -30,7 +30,7 @@ from urllib.parse import parse_qs, urlparse
 
 APP_NAME = "erm"
 GATEWAY_PREFIX = "/app/" + APP_NAME
-VERSION = "1.0.24"
+VERSION = "1.1.0"
 
 SELF = os.path.abspath(__file__)
 APP_DEST = os.path.dirname(SELF)           # app/ 的内容直接铺到 target 根
@@ -38,6 +38,7 @@ WWW = os.path.join(APP_DEST, "www")
 SOCK_PATH = os.path.join(APP_DEST, APP_NAME + ".sock")
 
 sys.path.insert(0, APP_DEST)
+import backup as B          # noqa: E402
 import config as C          # noqa: E402
 import monitor as M         # noqa: E402
 import notify as N          # noqa: E402
@@ -114,6 +115,21 @@ def validate(cfg):
             warnings.append("已启用 %s 但 webhook 为空" % C.PUSH_LABEL.get(ch, ch))
         elif not str(cfg.get("%s_webhook" % ch)).startswith("http"):
             errors.append("%s webhook 必须以 http(s):// 开头" % C.PUSH_LABEL.get(ch, ch))
+
+    # ---- 备份（v1.1.0）----
+    bdir = (cfg.get("backup_dir") or "").strip()
+    if cfg.get("backup_enabled") and not bdir:
+        warnings.append("已开启定时备份，但没填备份目录 —— 定时任务不会执行")
+    if bdir:
+        if not os.path.isabs(bdir):
+            errors.append("备份目录必须是绝对路径（如 /vol3/1000/backup/erm）")
+        elif not os.path.isdir(bdir):
+            warnings.append("备份目录当前不存在：%s（第一次备份时会自动创建）" % bdir)
+        elif not os.access(bdir, os.W_OK):
+            warnings.append("备份目录不可写：%s（检查应用授权目录）" % bdir)
+    bad_extras = [p for p in (cfg.get("backup_extra_files") or []) if not os.path.isabs(p)]
+    if bad_extras:
+        warnings.append("额外文件里有非绝对路径，备份时会跳过：%s" % "、".join(bad_extras[:3]))
     return warnings, errors
 
 
@@ -156,6 +172,14 @@ def snapshot():
 
 def get_cfg():
     with LOCK:
+        return dict(CFG)
+
+
+def reload_cfg():
+    """从磁盘重新读配置。恢复备份后必须走这里，否则内存里的 CFG 还是旧的。"""
+    global CFG
+    with LOCK:
+        CFG = C.load_config()
         return dict(CFG)
 
 
@@ -210,6 +234,30 @@ def status_payload():
         "last_report_day": st.get("last_report_day") or "",
         "warnings": warnings,
         "errors": errors,
+        "backup": backup_summary(cfg, st),
+    }
+
+
+def backup_summary(cfg, st=None):
+    """「备份」页与顶栏要的一小份摘要。除列目录数份数外不做别的 IO。"""
+    st = st if isinstance(st, dict) else STATE
+    ok, msg = B.dir_status(cfg)
+    last_ts = st.get("last_backup_ts") or 0
+    return {
+        "enabled": bool(cfg.get("backup_enabled")),
+        "dir": cfg.get("backup_dir") or "",
+        "dir_ok": ok,
+        "dir_msg": msg,
+        "time": cfg.get("backup_time"),
+        "weekdays": cfg.get("backup_weekdays"),
+        "keep": cfg.get("backup_keep"),
+        "include_state": bool(cfg.get("backup_include_state")),
+        "extra_count": len(cfg.get("backup_extra_files") or []),
+        "count": B.count_backups(cfg),
+        "next_str": B.next_backup_str(cfg, st),
+        "last_day": st.get("last_backup_day") or "",
+        "last_file": st.get("last_backup_file") or "",
+        "last_str": M.fmt_ts(cfg, last_ts) if last_ts else "—",
     }
 
 
@@ -294,6 +342,40 @@ def handle_action(body, query):
 
     if act == "doctor":
         return doctor_payload()
+
+    # ---- 备份（v1.1.0）----
+    if act == "backup_now":
+        with LOCK:
+            res = B.run_backup(get_cfg(), STATE, reason="manual", version=VERSION)
+            if res.get("ok"):
+                C.save_state(STATE)
+        out = status_payload()
+        out["backup_result"] = res
+        return out
+
+    if act == "backup_list":
+        cfg = get_cfg()
+        ok, msg = B.dir_status(cfg)
+        return {"ok": True, "dir": cfg.get("backup_dir") or "", "dir_ok": ok, "dir_msg": msg,
+                "rows": B.list_backups(cfg, limit=200)}
+
+    if act == "backup_restore":
+        name = str(body.get("file") or "")
+        with LOCK:
+            res = B.restore(get_cfg(), name, STATE, version=VERSION)
+            if res.get("ok"):
+                reload_cfg()
+                C.save_state(STATE)
+        out = status_payload()
+        # config 整份不回给前端：前端只需要知道「恢复了什么、旧的存哪了」
+        out["restore"] = {k: v for k, v in res.items() if k != "config"}
+        return out
+
+    if act == "backup_delete":
+        res = B.remove(get_cfg(), str(body.get("file") or ""))
+        out = status_payload()
+        out["deleted"] = res
+        return out
 
     return {"ok": False, "error": "未知动作：%s" % act}
 
@@ -498,6 +580,37 @@ def start_monitor():
     return th
 
 
+def start_backup():
+    th = threading.Thread(target=backup_loop, name="erm-backup", daemon=True)
+    th.start()
+    return th
+
+
+def backup_loop():
+    """定时备份：每 15 秒看一眼到点没有。
+
+    单独一个线程而不是挂进 monitor_loop —— 扫描要持 SCAN_LOCK，遇到超大目录可能拖上几分钟，
+    备份不该排在它后面（凌晨的备份不能因为一次扫描推迟到天亮）。两者写的 state 键不重叠。
+    """
+    while not STOP_EVENT.is_set():
+        try:
+            cfg = get_cfg()
+            if B.backup_due(cfg, STATE):
+                with LOCK:
+                    res = B.run_backup(cfg, STATE, reason="scheduled", version=VERSION)
+                    if res.get("ok"):
+                        C.save_state(STATE)
+                if res.get("ok"):
+                    log.info("定时备份完成：%s（%s 字节）", res.get("file"), res.get("size"))
+                    if res.get("removed"):
+                        log.info("按保留份数清理：%s", "、".join(res["removed"]))
+                else:
+                    log.warning("定时备份失败：%s", res.get("error"))
+        except Exception as e:
+            log.exception("备份线程异常: %s", e)
+        STOP_EVENT.wait(15)
+
+
 def main():
     C.VAR_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -525,6 +638,7 @@ def main():
     signal.signal(signal.SIGINT, on_term)
 
     start_monitor()
+    start_backup()
 
     try:
         server = UnixHTTPServer(SOCK_PATH, Handler)

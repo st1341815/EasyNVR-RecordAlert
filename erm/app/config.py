@@ -65,6 +65,17 @@ DEFAULT_CONFIG = {
     "email_from": "",                  # 发件人，空 = 用 email_smtp_user
     "email_to": [],                    # 收件人列表
     "email_subject_prefix": "[EasyNVR 录像监控]",
+    # ---- 备份（v1.1.0）----
+    # 备份的就是这份 config.json（webhook、别名、阈值全在里面），外加可选的运行状态
+    # 与任意额外文件。目录故意不给默认值：宁可让用户明确选一块盘，也不要往系统盘乱写。
+    "backup_enabled": False,           # 关掉后只能手动备份
+    "backup_dir": "",                  # 绝对路径，如 /vol3/1000/backup/erm
+    "backup_time": "03:00",            # HH:MM，到点即备份，当天只备一次
+    "backup_weekdays": [1, 2, 3, 4, 5, 6, 7],
+    "backup_keep": 30,                 # 只保留最近 N 份，0 = 不清理
+    "backup_include_config": True,     # config.json（必留，否则备份没意义，但仍给你关的自由）
+    "backup_include_state": False,     # state.json：告警状态与「今天日报发过没」，一般不用备
+    "backup_extra_files": [],          # 额外文件，每行一个绝对路径
     # 录像文件后缀（EasyNVR 默认 mp4；HLS 模式会有 .ts）
     "video_exts": [".mp4", ".ts", ".mov", ".mkv", ".flv", ".avi", ".m4v", ".mpg", ".mpeg"],
     # 时区：告警时间文案与「昨天」的边界都按它算
@@ -319,6 +330,24 @@ def normalize(raw):
             e = "." + e
         exts.append(e.lower())
     cfg["video_exts"] = exts or list(DEFAULT_CONFIG["video_exts"])
+
+    # ---- 备份（v1.1.0）----
+    cfg["backup_enabled"] = as_bool(cfg.get("backup_enabled"), False)
+    cfg["backup_dir"] = str(cfg.get("backup_dir") or "").strip().rstrip("/")
+    cfg["backup_time"] = norm_hhmm(cfg.get("backup_time"), "03:00")
+    cfg["backup_weekdays"] = norm_weekdays(cfg.get("backup_weekdays"))
+    cfg["backup_keep"] = as_int(cfg.get("backup_keep"), 30, 0, 999)
+    cfg["backup_include_config"] = as_bool(cfg.get("backup_include_config"), True)
+    cfg["backup_include_state"] = as_bool(cfg.get("backup_include_state"), False)
+    # 额外文件：只收绝对路径，重复项按首次出现去重（避免同一份文件在备份里出现两次）
+    extras, seen = [], set()
+    for raw in as_list(cfg.get("backup_extra_files")):
+        p = str(raw or "").strip()
+        if not p or p in seen:
+            continue
+        seen.add(p)
+        extras.append(p)
+    cfg["backup_extra_files"] = extras
     return cfg
 
 

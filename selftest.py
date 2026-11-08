@@ -967,6 +967,94 @@ def test_ui_shell():
     ok("@media (prefers-reduced-motion: reduce)" in html, "尊重系统「减少动态效果」")
 
 
+def test_backup():
+    """备份（v1.1.0）：落盘、列表、按份数清理、恢复、拒绝路径穿越、定时到点判定。"""
+    import backup as B
+    from pathlib import Path
+
+    for k in ("backup_enabled", "backup_dir", "backup_time", "backup_keep",
+              "backup_weekdays", "backup_include_config", "backup_include_state",
+              "backup_extra_files"):
+        ok(k in C.DEFAULT_CONFIG, "配置：默认值里有 %s" % k)
+
+    bkdir = Path(TMP_VAR) / "bkdir"
+
+    # ① 没设目录就拒绝，而不是默默写到系统盘
+    r = B.run_backup(C.normalize({"backup_dir": ""}), {})
+    ok(not r["ok"], "备份：没设目录时拒绝执行", r)
+
+    # ② 目录还不存在 → 自动创建并落盘
+    cfg = C.normalize({"backup_dir": str(bkdir), "backup_keep": 5})
+    r = B.run_backup(cfg, {}, reason="manual")
+    ok(r["ok"], "备份：首次备份成功", r)
+    p = Path(r["path"])
+    ok(p.is_file(), "备份：文件已落盘")
+    doc = json.loads(p.read_text(encoding="utf-8"))
+    ok("config.json" in (doc.get("files") or {}), "备份：包含 config.json")
+    eq(doc.get("reason"), "manual", "备份：记下了备份原因")
+    eq(len(B.list_backups(cfg)), 1, "备份：列表返回 1 份")
+
+    # ③ 保留份数：keep=2 时做 4 份只留 2 份
+    cfg2 = C.normalize({"backup_dir": str(bkdir), "backup_keep": 2})
+    for _ in range(4):
+        B.run_backup(cfg2, {}, reason="scheduled")
+    eq(len(B.list_backups(cfg2)), 2, "备份：按保留份数清理到 2 份")
+
+    # ④ 路径穿越必须拦掉（restore/delete 只接受自己生成的文件名）
+    ok(not B.restore(cfg, "../../etc/passwd")["ok"], "备份：拒绝路径穿越的文件名")
+    ok(not B.remove(cfg, "../x.json")["ok"], "备份：删除也拒绝非法文件名")
+
+    # ⑤ 恢复：改掉配置再恢复，回到备份时的值；但备份设置本身不跟着回退
+    C.save_config(C.normalize({"record_root": "/vol1/marker-A", "backup_dir": str(bkdir)}))
+    r = B.run_backup(C.load_config(), {}, reason="manual")
+    ok(r["ok"], "备份：恢复前先备一份", r)
+    C.save_config(C.normalize({"record_root": "/vol1/marker-B", "backup_dir": str(bkdir)}))
+    eq(C.load_config()["record_root"], "/vol1/marker-B", "备份：改动已写入")
+    res = B.restore(C.load_config(), r["file"], {})
+    ok(res["ok"], "备份：恢复成功", res)
+    eq(C.load_config()["record_root"], "/vol1/marker-A", "备份：恢复后回到备份时的值")
+    eq(C.load_config()["backup_dir"], str(bkdir), "备份：恢复时保留当前备份设置")
+    ok(res.get("pre_backup"), "备份：恢复前自动留了 pre-restore 快照")
+    eq(res.get("restored_files"), ["config.json"], "备份：没勾运行状态时只恢复 config.json")
+
+    # ⑤b 运行状态：勾了「运行状态」时 state 也跟着回来，但 last_backup_* 水位线不回退
+    C.save_config(C.normalize({"backup_dir": str(bkdir), "backup_include_state": True}))
+    C.save_state({"channels": {"cam1": {"state": "ok"}}, "last_check": 777,
+                  "last_backup_day": "2000-01-01", "last_backup_file": "old.json"})
+    rs = B.run_backup(C.load_config(), {}, reason="manual")
+    ok(rs["ok"], "备份：带运行状态能备成功", rs)
+    eq(sorted(rs.get("items") or []), ["config.json", "state.json"],
+       "备份：内容含 config.json 与 state.json")
+    live = {"channels": {}, "last_check": 1, "last_backup_file": "keep.json"}
+    res2 = B.restore(C.load_config(), rs["file"], live)
+    ok(res2["ok"], "备份：带运行状态恢复成功", res2)
+    eq(live.get("channels"), {"cam1": {"state": "ok"}}, "备份：运行状态跟着恢复")
+    eq(live.get("last_check"), 777, "备份：备份里有的键覆盖当前值")
+    ok(live.get("last_backup_file") != "old.json", "备份：last_backup_* 水位线不跟着回退")
+    eq(sorted(res2.get("restored_files") or []), ["config.json", "state.json"],
+       "备份：恢复文件清单含 state.json")
+
+    # ⑥ 定时：没启用 / 没到点 / 今天已备 都不触发
+    off = C.normalize({"backup_enabled": False, "backup_dir": str(bkdir)})
+    ok(not B.backup_due(off, {}), "定时：未启用不触发")
+    on = C.normalize({"backup_enabled": True, "backup_dir": str(bkdir),
+                      "backup_time": "03:00", "backup_weekdays": [1, 2, 3, 4, 5, 6, 7]})
+    at = B.now_dt(on).replace(hour=3, minute=1, second=0, microsecond=0)
+    ok(B.backup_due(on, {}, now=at), "定时：到点且今天没备 → 触发")
+    ok(not B.backup_due(on, {"last_backup_day": B.today_str(on, at)}, now=at),
+       "定时：今天已备 → 不再触发")
+    ok(not B.backup_due(on, {}, now=at.replace(hour=2, minute=59)), "定时：没到点 → 不触发")
+    ok(not B.backup_due(C.normalize({"backup_enabled": True, "backup_dir": ""}), {}),
+       "定时：开了开关但没目录 → 不触发")
+    ok(B.next_backup_str(off, {}) == "未启用", "定时：未启用时下次时间显示「未启用」")
+
+    # ⑦ UI 骨架
+    html = open(os.path.join(APP, "www", "index.html"), encoding="utf-8").read()
+    ok('id="page-backup"' in html, "UI：有备份页容器")
+    ok('data-page="backup"' in html, "UI：有备份页签")
+    ok("'overview', 'config', 'backup'" in html, "UI：键盘切页顺序包含备份")
+
+
 def main():
     print("== erm 自检开始（数据目录 %s）" % TMP_VAR)
     srv, webhook = start_mock()
@@ -975,7 +1063,7 @@ def main():
                    test_easynvr_layout, test_online_streak,
                    test_scan_alert_and_silence, test_daily_schedule, test_report_text,
                    test_push_plan_and_report_window, test_stats,
-                   test_normalize_keeps_secret, test_ui_shell):
+                   test_normalize_keeps_secret, test_ui_shell, test_backup):
             fn()
         test_push(webhook)
         test_rate_limit_retry(webhook)

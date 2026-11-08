@@ -1102,6 +1102,35 @@ def test_backup():
     ok(not B.export_text(icfg, "erm-backup-20000101-000000.json")["ok"], "导出：不存在时拒绝")
 
 
+def test_uninstall_wizard():
+    """v1.1.4：卸载向导——让用户选「保留现有文件」还是「清除所有套件数据文件」。"""
+    pkg = os.path.dirname(APP)
+    wz = os.path.join(pkg, "wizard", "uninstall")
+    ok(os.path.isfile(wz), "打包：有 wizard/uninstall（卸载向导文件）")
+    steps = json.load(open(wz, encoding="utf-8"))
+    ok(isinstance(steps, list) and bool(steps), "卸载向导：顶层是非空数组（飞牛格式）")
+    items = [it for s in steps for it in (s.get("items") or [])]
+    ok("wizard_delete_data" in {it.get("field") for it in items},
+       "卸载向导：字段名 wizard_delete_data（平台认这个）")
+    radios = [it for it in items
+              if it.get("type") == "radio" and it.get("field") == "wizard_delete_data"]
+    ok(bool(radios), "卸载向导：是 radio 单选项")
+    r = radios[0] if radios else {}
+    eq({o.get("value") for o in (r.get("options") or [])}, {"true", "false"},
+       "卸载向导：两个选项值必须是 true / false")
+    eq(r.get("initValue"), "false", "卸载向导：默认落在「保留」，不预设成清除")
+    labels = " ".join(o.get("label") or "" for o in (r.get("options") or []))
+    ok("保留" in labels and "清除" in labels, "卸载向导：两个选项文案有「保留」「清除」")
+
+    # 卸载脚本：怎么取向导值、默认保留、不碰用户的备份目录
+    sh = open(os.path.join(pkg, "cmd", "uninstall_callback"), encoding="utf-8").read()
+    ok("wizard_delete_data" in sh, "卸载脚本：读取 wizard_delete_data")
+    ok('"${DEL}" = "true"' in sh, "卸载脚本：只有明确等于 true 才清除")
+    ok("installer-variables" in sh, "卸载脚本：环境变量拿不到时回落 installer-variables")
+    ok("rm -rf" not in sh, "卸载脚本：不用 rm -rf（find -mindepth 1 -delete 保留目录外壳）")
+    ok("backup_dir" not in sh, "卸载脚本：不碰用户自选的备份目录")
+
+
 def main():
     print("== erm 自检开始（数据目录 %s）" % TMP_VAR)
     srv, webhook = start_mock()
@@ -1110,7 +1139,8 @@ def main():
                    test_easynvr_layout, test_online_streak,
                    test_scan_alert_and_silence, test_daily_schedule, test_report_text,
                    test_push_plan_and_report_window, test_stats,
-                   test_normalize_keeps_secret, test_ui_shell, test_backup):
+                   test_normalize_keeps_secret, test_ui_shell, test_backup,
+                   test_uninstall_wizard):
             fn()
         test_push(webhook)
         test_rate_limit_retry(webhook)

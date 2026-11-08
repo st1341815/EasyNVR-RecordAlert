@@ -24,12 +24,24 @@ find "$PKG" -type f ! -path "$PKG/cmd/*" ! -name '*.py' -exec chmod 644 {} +
 
 echo "[3/6] 校验 JSON 文件（privilege / resource / wizard / ui/config）"
 for f in "$PKG/config/privilege" "$PKG/config/resource" \
-         "$PKG/wizard/install" "$PKG/wizard/config" "$PKG/app/ui/config"; do
+         "$PKG/wizard/install" "$PKG/wizard/config" "$PKG/wizard/uninstall" \
+         "$PKG/app/ui/config"; do
     [ -f "$f" ] || { echo "缺少 $f" >&2; exit 1; }
     python3 -c "import json,sys;json.load(open(sys.argv[1],encoding='utf-8'))" "$f" \
         || { echo "JSON 非法：$f" >&2; exit 1; }
     echo "   ok  $f"
 done
+# 卸载向导写错字段名 = 界面上那个「保留 / 清除」选项直接不出现，装完才发现
+python3 - "$PKG/wizard/uninstall" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1], encoding='utf-8'))
+fields = {it.get("field") for step in d for it in step.get("items", [])}
+assert "wizard_delete_data" in fields, "wizard/uninstall 缺少 field=wizard_delete_data"
+vals = {o.get("value") for step in d for it in step.get("items", [])
+        for o in (it.get("options") or [])}
+assert vals == {"true", "false"}, "wizard_delete_data 的选项值必须是 true / false，实际 %s" % vals
+PY
+echo "   ok  wizard/uninstall（wizard_delete_data: true/false）"
 
 echo "[4/6] 校验 manifest（飞牛是平铺 key = value，不能有 [section]）"
 grep -q '^\[' "$PKG/manifest" && { echo "manifest 里出现 [section]，飞牛不认" >&2; exit 1; }

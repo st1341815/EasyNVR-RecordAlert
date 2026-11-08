@@ -1,0 +1,27 @@
+[
+  {
+    "stepTitle": "卸载 EasyNVR 录像监控",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "保留或删除应用设置。配置里有推送 Webhook（钉钉/飞书/企微）、企业微信与飞书地址、摄像头别名、告警阈值、日报时间——删掉后重装要全部重填一遍。注意：你自己指定目录里已有的备份文件（erm-backup-*.json）不在套件数据范围内，无论选哪项都不会被删除。"
+      },
+      {
+        "type": "radio",
+        "field": "wizard_delete_data",
+        "label": "仅卸载，保留现有文件以备将来重新安装。",
+        "initValue": "false",
+        "options": [
+          {
+            "label": "保留现有文件",
+            "value": "false"
+          },
+          {
+            "label": "清除所有套件数据文件（不可恢复）！！！",
+            "value": "true"
+          }
+        ]
+      }
+    ]
+  }
+]

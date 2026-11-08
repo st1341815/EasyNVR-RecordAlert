@@ -11,6 +11,38 @@
 - Release 附件：`EasyNVR-RecordAlert-<版本>.fpk`
 - 主题写正文首行 `## v<版本> · 主题`；仓库内构建产物固定 `dist/erm.fpk`
 
+## v1.1.4 · 卸载时可选「保留现有文件」还是「清除所有套件数据文件」
+
+### 一、为什么
+
+之前卸载是「一刀切保留」：`uninstall_callback` 什么都不删，`/volX/@appdata/erm`
+一直留着，想清干净得自己 ssh 上去 `rm -rf`。飞牛官方应用（和各路第三方 fpk）
+卸载时会弹一个选择框：「保留现有文件以备将来重新安装」/「清除所有套件数据文件（不可恢复）」——
+本应用没有，是因为包里少了一个文件：`wizard/uninstall`。
+
+### 二、怎么做的
+
+- 新增 `wizard/uninstall`（飞牛卸载向导的 JSON），一个 radio 字段 `wizard_delete_data`：
+  - `false` → 保留现有文件（**默认**）
+  - `true` → 清除所有套件数据文件（不可恢复）
+- `cmd/uninstall_callback` 按这个值决定是否清空 `$TRIM_PKGVAR`（config.json / state.json /
+  logs / 运行态文件）与 etc 内容。三条底线：
+  1. **默认保留**：变量为空、文件缺失、值不是 `true` 一律不清 —— 宁可少删不可误删，
+     配置里是 webhook、摄像头别名、阈值，删了只能重填；
+  2. **取值双通道**：先看环境变量 `$wizard_delete_data`（install 侧已验证平台会注入
+     `wizard_*`），拿不到再回落解析 `etc/installer-variables`；
+  3. **不碰用户备份目录**：应用里自选的备份目录（如 `/vol3/1000/backup/erm`）里的
+     `erm-backup-*.json` 属于用户档案，不在套件数据范围内，无论选哪项都不删。
+- 清理用 `find -mindepth 1 -delete` 而不是 `rm -rf`：只清内容、保留目录外壳，
+  平台随后还要处理这些目录。日志写 `/var/log/apps/erm-uninstall.log`。
+- `build.sh` 加了卸载向导的字段校验（JSON 合法 + `wizard_delete_data` 存在 + 选项值
+  只能是 `true`/`false`）——字段名写错的表现是「装完卸载时不弹框」，很难在打包阶段发现。
+
+### 三、自检
+
+338 → **350 项**（卸载向导 JSON 结构与默认值、选项值、脚本读取字段名、
+只在 `true` 时清除、回落 installer-variables、不用 rm -rf、不碰 backup_dir）。
+
 ## v1.1.3 · 备份记录每行新增「导出」
 
 ### 一、为什么

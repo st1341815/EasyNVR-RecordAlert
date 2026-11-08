@@ -1,6 +1,57 @@
 #!/bin/bash
-# 卸载后：默认保留 $TRIM_PKGVAR（配置/状态/日志），重装后可直接沿用。
-# 想彻底清干净：手动删除 /volX/@appdata/erm。
-DEST="${TRIM_APPDEST:-/var/apps/erm/target}"
-rm -f "${DEST}/erm.sock" 2>/dev/null
+# 卸载后：按卸载向导的选择决定是否清除数据。
+#   保留（默认）：$TRIM_PKGVAR 原样留着 —— 重装后配置/状态/日志直接沿用。
+#   清除：清空 $TRIM_PKGVAR（config.json / state.json / logs / 运行态文件）与 etc 下的内容。
+#
+# 两条底线：
+#   1. 取不到用户的选择（变量为空、文件缺失、值不是 true）一律按「保留」处理。
+#      宁可少删，不可误删 —— 配置里有 webhook、别名、阈值，删了只能重填。
+#   2. 用户自选的「备份目录」（如 /vol3/1000/backup/erm）一律不碰。
+#      那是用户自己的档案，不属于套件数据范围。
+
+APP_NAME="erm"
+DEST="${TRIM_APPDEST:-/var/apps/${APP_NAME}/target}"
+VAR="${TRIM_PKGVAR:-/var/apps/${APP_NAME}/var}"
+LOG="/var/log/apps/${APP_NAME}-uninstall.log"
+
+log() {
+    if [ -d /var/log/apps ] && [ -w /var/log/apps ]; then
+        printf '%s\n' "$*" >>"${LOG}" 2>/dev/null || printf '%s\n' "$*" >&2
+    else
+        printf '%s\n' "$*" >&2
+    fi
+}
+
+# 卸载前先把 socket 清掉（停服务时可能残留）
+rm -f "${DEST}/${APP_NAME}.sock" 2>/dev/null
+
+# 取向导选择：优先环境变量（平台把 wizard_* 注入 cmd 脚本，install 侧已验证），
+# 退而在 etc/installer-variables 里找；都没有就当没选 = 保留。
+DEL="${wizard_delete_data:-}"
+if [ -z "${DEL}" ]; then
+    for f in "$(dirname "${DEST%/}")/etc/installer-variables" \
+             "/var/apps/${APP_NAME}/etc/installer-variables" \
+             "${VAR%/}/installer-variables"; do
+        if [ -r "${f}" ]; then
+            DEL="$(sed -n 's/^[[:space:]]*wizard_delete_data[[:space:]]*=[[:space:]]*//p' "${f}" | tail -1)"
+            [ -n "${DEL}" ] && break
+        fi
+    done
+fi
+# 去掉可能的引号与空白
+DEL="$(printf '%s' "${DEL}" | tr -d "\"'[:space:]")"
+
+if [ "${DEL}" = "true" ]; then
+    log "[$(date '+%F %T')] 卸载：用户选择「清除所有套件数据文件」，开始清理"
+    for d in "${VAR}" "/var/apps/${APP_NAME}/etc" "$(dirname "${DEST%/}")/etc" "${TRIM_PKGHOME:-}"; do
+        [ -n "${d}" ] && [ -d "${d}" ] || continue
+        # 只清目录内容、保留目录外壳：平台随后还要处理这些目录，留壳更稳
+        find "${d}" -mindepth 1 -delete 2>/dev/null
+        log "  已清空 ${d}"
+    done
+    log "[$(date '+%F %T')] 清理完成。备份目录（应用里自选的路径）未受影响。"
+else
+    log "[$(date '+%F %T')] 卸载：保留数据（wizard_delete_data=${DEL:-未提供}），${VAR} 原样保留"
+fi
+
 exit 0

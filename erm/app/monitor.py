@@ -663,6 +663,77 @@ def report_due(cfg, state, now=None):
     return (now.hour, now.minute) >= (hh, mm)
 
 
+# ---------------------------------------------------------------- 静默期
+
+QUIET_DIGEST_MAX = 8        # 汇总里最多逐条列几项，剩下的合并成一句
+
+
+def _short_ts(cfg, ts):
+    """汇总用的短时间：跨夜也能分清是哪天，但不至于一行放不下。"""
+    if not ts:
+        return "—"
+    return datetime.fromtimestamp(int(ts), get_tz(cfg)).strftime("%m-%d %H:%M")
+
+
+def quiet_track(state, ev, now_ts):
+    """推送时段外：把异常轨迹记进 state["quiet_events"]，出时段时汇总一条。
+
+    v1.1.6 修的是这个洞 ——
+        22:31 断流（时段外，不推） → 02:04 自己好了 → 08:00 进时段，检测一切正常
+        结果：既没有告警，也没有恢复通知，这 3.5 小时等于没发生过。
+    所以时段外不光要"检测"，还得把"发生过什么"留下来。
+    """
+    q = state.get("quiet_events")
+    if not isinstance(q, dict):
+        q = state["quiet_events"] = {}
+    for ch in ev.get("channels") or []:
+        name = ch.get("channel")
+        if not name:
+            continue
+        rec = q.get(name)
+        if ch.get("alert"):
+            if not isinstance(rec, dict):
+                rec = q[name] = {"label": ch.get("label") or name, "from": now_ts}
+            rec["to"] = now_ts
+            rec["status"] = ch.get("status") or rec.get("status") or "silent"
+            rec["recovered"] = False
+        elif isinstance(rec, dict) and not rec.get("recovered"):
+            rec["recovered"] = True          # 静默期内自愈：正是最容易被漏掉的那类
+            rec["to"] = now_ts
+    return q
+
+
+def build_quiet_digest(cfg, state, now_ts):
+    """把静默期攒下的事件拼成一条消息；一件都没发生就返回 None（安静就别打扰）。"""
+    q = state.get("quiet_events")
+    if not isinstance(q, dict) or not q:
+        return None
+    recs = [r for r in q.values() if isinstance(r, dict) and r.get("from")]
+    if not recs:
+        return None
+    recs.sort(key=lambda r: int(r.get("from") or 0))
+    lines = []
+    for r in recs[:QUIET_DIGEST_MAX]:
+        label = r.get("label") or "通道"
+        end = int(r.get("to") or now_ts)
+        mins = max(1, (end - int(r["from"])) // 60)
+        lines.append("· %s：%s — %s，共 %d 分钟（%s）" % (
+            label, _short_ts(cfg, r["from"]), _short_ts(cfg, end), mins,
+            "已恢复" if r.get("recovered") else "仍在异常"))
+    more = len(recs) - len(lines)
+    if more > 0:
+        lines.append("· 另有 %d 项，详见运行日志" % more)
+    since = int(state.get("quiet_since") or 0)
+    span = "（%s 起）" % _short_ts(cfg, since) if since else ""
+    return (
+        "【EasyNVR 静默期汇总】推送时段外共 %d 项异常%s\n"
+        "%s\n"
+        "检测时间：%s\n"
+        "已恢复正常推送；仍在异常的通道会另发告警。"
+        % (len(recs), span, "\n".join(lines), fmt_ts(cfg, now_ts))
+    )
+
+
 # ---------------------------------------------------------------- 执行
 
 def run_scan(cfg, state, force_alert=False):
@@ -672,6 +743,13 @@ def run_scan(cfg, state, force_alert=False):
     不动通道告警状态、不推送 —— 好处是夜间断流不会被静默规则「吃掉」：
     早上一进时段，因为 alerting 仍是 False、last_alert_time 没推进，立刻就会告警。
     手动「立即检测」（force_alert）不受限制，用户就在页面盯着。
+
+    v1.1.6 补两个洞：
+      · **监控自身失效穿透静默** —— 录像目录整体不可达时不看时段直接告警。夜里
+        网络共享断了、监控已经瞎了，这时候还"按计划不推送"是本末倒置。
+      · **静默期事件汇总** —— 时段外把异常轨迹记进 state["quiet_events"]，进时段时
+        先推一条「夜里发生过什么」。原先只在"进时段时仍然异常"才告警，凡是夜间
+        断流又自己恢复的，等于完全没发生。
     """
     now_ts = int(time.time())
     ev = evaluate(cfg, with_counts=False)
@@ -679,17 +757,29 @@ def run_scan(cfg, state, force_alert=False):
     events = []
 
     allowed = alert_push_allowed(cfg, now_dt(cfg))
-    if not allowed and not force_alert:
+    quiet = not allowed and not force_alert
+    # v1.1.6：监控自己瞎了（目录没配 / 整体不可达 / 一个通道都认不出来）不能等时段 ——
+    # 这时候「按计划不推送」等于出事没人知道，比夜里被吵醒严重得多。
+    blind = bool(ev.get("error")) and not ev["channels"]
+
+    if quiet and not blind:
         state["last_check"] = now_ts
         state["last_result"] = ev
+        quiet_track(state, ev, now_ts)          # 留下「发生过什么」，出时段时汇总
         if not state.get("quiet_since"):
             state["quiet_since"] = now_ts
             logger.info("进入推送时段外（%s）：告警照常检测，但不推送；进入时段后立即补发",
                         push_plan_text(cfg))
         C.save_state(state)
         return {"result": ev, "events": [], "pushed": [], "quiet": True}
+
+    digest = None
     if allowed and state.pop("quiet_since", None):
         logger.info("离开推送时段外，恢复正常推送（%s）", push_plan_text(cfg))
+        digest = build_quiet_digest(cfg, state, now_ts)
+        if digest:
+            events.append({"scope": "__quiet__", "kind": "digest", "message": digest})
+        state.pop("quiet_events", None)
 
     if ev.get("error") and not ev["channels"]:
         # 全局错误（目录没配/不可读/没有通道）：也要告警，否则用户以为在监控

@@ -478,14 +478,26 @@ def test_push_plan_and_report_window():
                              "alert_push_weekdays": "1,2,3,4,5",
                              "alert_window_from": "08:00", "alert_window_to": "18:00"})
     orig_now = M.now_dt
+
+    def _age_files(root, hours):
+        ts = int(time.time()) - int(hours * 3600)
+        for dirpath, _dirs, files in os.walk(root):
+            for fn in files:
+                os.utime(os.path.join(dirpath, fn), (ts, ts))
+
+    def _freshen(root):
+        for dirpath, _dirs, files in os.walk(root):
+            for fn in files:
+                os.utime(os.path.join(dirpath, fn), None)
+
     try:
+        # ---- v1.1.6①：目录整体不可达 = 监控自己瞎了，必须穿透静默
         M.now_dt = lambda cfg: sat                            # 周六 09:00（非推送日）
         st = {}
         res = M.run_scan(quiet_cfg, st)
-        ok(res.get("quiet") is True, "时段外：run_scan 标记 quiet")
-        eq(res.get("events"), [], "时段外：不产生任何推送事件")
-        eq(st.get("channels"), {}, "时段外：通道告警状态不推进（夜间断流不会被静默吃掉）")
-        ok(st.get("quiet_since"), "时段外：记录 quiet_since 只写一次日志")
+        ok(not res.get("quiet"), "穿透静默：时段外 + 目录不可达 → 不算 quiet")
+        eq(len(res.get("events") or []), 1, "穿透静默：时段外 + 目录不可达 → 照常产生告警")
+        ok(st["channels"].get("__global__", {}).get("alerting"), "穿透静默：全局告警状态已推进")
 
         M.now_dt = lambda cfg: datetime(2026, 10, 28, 10, 0, tzinfo=tz)   # 周三 10:00
         st2 = {}
@@ -493,6 +505,41 @@ def test_push_plan_and_report_window():
         ok(not res2.get("quiet"), "时段内：正常判定")
         eq(len(res2.get("events") or []), 1, "时段内：目录不存在 → 照样产生告警事件")
         ok(not st2.get("quiet_since"), "时段内：清掉 quiet_since")
+
+        # ---- v1.1.6②：通道级断流在时段外仍静默，但要留下轨迹
+        root2, _f2 = mk_record_tree(os.path.join(TMP_VAR, "record-quiet"))
+        quiet_cfg2 = C.normalize({"record_root": root2, "video_exts": ".mp4",
+                                  "alert_threshold_minutes": "60",
+                                  "alert_push_weekdays": "1,2,3,4,5",
+                                  "alert_window_from": "08:00", "alert_window_to": "18:00"})
+        _age_files(root2, 5)                                  # 5 小时前的录像 → 断流
+        M.now_dt = lambda cfg: sat
+        s3 = {}
+        r3 = M.run_scan(quiet_cfg2, s3)
+        ok(r3.get("quiet") is True, "静默期：通道断流在时段外仍然静默")
+        eq(r3.get("events"), [], "静默期：时段外不推送")
+        ok(s3.get("quiet_events"), "静默期：异常轨迹已记进 quiet_events")
+        ok(s3.get("quiet_since"), "静默期：记录 quiet_since")
+
+        # 断流在静默期内自愈 → 出时段时必须汇总，否则这段时间等于没发生
+        _freshen(root2)
+        M.now_dt = lambda cfg: datetime(2026, 10, 28, 10, 0, tzinfo=tz)   # 进时段
+        r4 = M.run_scan(quiet_cfg2, s3)
+        dig = [e for e in (r4.get("events") or []) if e.get("kind") == "digest"]
+        eq(len(dig), 1, "静默期汇总：进时段只推一条汇总")
+        ok("静默期汇总" in dig[0]["message"], "静默期汇总：标题正确", dig[0]["message"])
+        ok("已恢复" in dig[0]["message"], "静默期汇总：自愈的标成「已恢复」", dig[0]["message"])
+        ok(not s3.get("quiet_events"), "静默期汇总：推完清空 quiet_events")
+        ok(not s3.get("quiet_since"), "静默期汇总：推完清掉 quiet_since")
+
+        # 安静的夜晚：一件异常都没记下，就不该冒出一条空汇总
+        s5 = {"quiet_since": int(time.time()) - 3600}
+        M.now_dt = lambda cfg: datetime(2026, 10, 28, 10, 0, tzinfo=tz)
+        r6 = M.run_scan(quiet_cfg2, s5)
+        ok(not [e for e in (r6.get("events") or []) if e.get("kind") == "digest"],
+           "静默期汇总：无异常时不出空汇总")
+        eq(M.build_quiet_digest(quiet_cfg2, {}, int(time.time())), None,
+           "静默期汇总：无事件时 build 直接返回 None")
     finally:
         M.now_dt = orig_now
 

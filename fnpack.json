@@ -29,8 +29,19 @@
       "install_type": "",
       "is_docker": false,
       "service_port": "",
-      "details_updated_at": "2026-11-08T11:45:00+08:00",
+      "details_updated_at": "2026-11-08T12:30:00+08:00",
       "releases": {
+        "1.1.6": {
+          "changelog": "推送时段不再吞掉夜里发生的事：① 监控自身失效（录像目录整体不可达 / 认不出通道）穿透静默，随时告警；② 时段外记录异常轨迹，进时段先推一条「静默期汇总」（哪天哪条通道断了多久、是否已自愈）。原先夜间断流又自愈的完全不会告知。一件异常都没有则不推空汇总，最多列 8 条。自检 364 项。",
+          "updated_at": "2026-11-08T12:30:00+08:00",
+          "packages": {
+            "all": {
+              "download_url": "https://github.com/st1341815/EasyNVR-RecordAlert/releases/download/v1.1.6/EasyNVR-RecordAlert-1.1.6.fpk",
+              "sha256": "cbf0a2522cc939d323fd650b4c84738bfeeca5dd4872e1c499260130d430c50d",
+              "size": 99231
+            }
+          }
+        },
         "1.1.5": {
           "changelog": "修「导入备份」在外接盘（exFAT / FAT32 / 部分 ntfs-3g）上必失败：这类文件系统没有 POSIX 权限位，chmod 抛 EPERM；run_backup 早包了 try、import_file 没包且排在 os.replace 之前，导致同一目录「立即备份」成功、「导入」必失败。现抽出 _tighten() 共用，导入改为先落盘再收紧权限；真正写不进去时区分 EPERM/EACCES/EROFS 给出可读提示。自检 354 项。",
           "updated_at": "2026-11-08T11:45:00+08:00",

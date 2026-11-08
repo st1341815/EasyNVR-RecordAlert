@@ -1053,6 +1053,8 @@ def test_backup():
     ok('id="page-backup"' in html, "UI：有备份页容器")
     ok('data-page="backup"' in html, "UI：有备份页签")
     ok("'overview', 'config', 'backup'" in html, "UI：键盘切页顺序包含备份")
+    ok("#page-config,#page-backup,#page-overview{max-width:1080px" in html,
+       "UI：备份页与另两页同宽（1080）")
 
 
 def main():

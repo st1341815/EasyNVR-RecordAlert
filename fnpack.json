@@ -29,8 +29,19 @@
       "install_type": "",
       "is_docker": false,
       "service_port": "",
-      "details_updated_at": "2026-11-08T08:12:00+08:00",
+      "details_updated_at": "2026-11-08T08:44:00+08:00",
       "releases": {
+        "1.1.1": {
+          "changelog": "备份页宽度收齐到 1080，与概览/配置两页一致：限宽规则漏了 #page-backup，它吃满 1440 而另两页 1080，切页时版面横向跳动。自检 318 项。",
+          "updated_at": "2026-11-08T08:44:00+08:00",
+          "packages": {
+            "all": {
+              "download_url": "https://github.com/st1341815/EasyNVR-RecordAlert/releases/download/v1.1.1/EasyNVR-RecordAlert-1.1.1.fpk",
+              "sha256": "33eb986def8215cd333a400769feffb07cc9bed57208e16b2a3fa1a06aebafc9",
+              "size": 93215
+            }
+          }
+        },
         "1.1.0": {
           "changelog": "新增「备份」页（第三个页签）：把 config.json 备份到你自己指定的目录，可手动立即备份，也可按「每天 HH:MM + 星期几」定时执行，只保留最近 N 份，一键恢复（恢复前自动再存一份 pre-restore 快照）。备份内容可选：应用配置（webhook / 摄像头别名 / 阈值全在里面）、运行状态、额外文件（绝对路径，每行一个）。备份是单个 JSON，可直接打开看、直接 diff；不备份日志（几十 MB，恢复它没有意义）。恢复时保留当前备份设置，不会出现「恢复完配置，备份功能自己关了」。顶部导航从两页变三页，← → 切页顺序同步；自检 277 → 309 项。",
           "updated_at": "2026-11-08T08:12:00+08:00",

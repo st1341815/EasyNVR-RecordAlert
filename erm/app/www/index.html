@@ -340,8 +340,9 @@
      form .grid 是 minmax(220px,1fr) 的 auto-fit，宽度一给它就直接排成 5~6 列，
      字段被压成一根根细条，反而没法填。所以配置页单独限宽居中，并把列数封顶 3。
      概览页原本铺满 1440（数据页，宽度越多越好看），
-     2026-11-08 起按用户要求也收成 1080 —— 两页切换时宽度不再跳。 */
-  #page-config,#page-overview{max-width:1080px;margin:0 auto}
+     2026-11-08 起按用户要求也收成 1080 —— 两页切换时宽度不再跳。
+     备份页同样是表单，一并收进 1080，翻页时三页宽度一致。 */
+  #page-config,#page-backup,#page-overview{max-width:1080px;margin:0 auto}
   @media (min-width:1000px){
     form .grid{grid-template-columns:repeat(3,minmax(0,1fr))}
   }

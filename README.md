@@ -20,7 +20,29 @@
 > `EasyNVR-RecordAlert-<版本>.fpk` → 飞牛「应用中心 → 手动安装」（**向导不问录像目录与通道**）→ 打开应用填录像目录 → 到「设置 → 授权目录」授权该目录 → 重启应用。
 > 版本变更见 [CHANGELOG.md](CHANGELOG.md)。
 
-### 最新版本 v1.1.9
+### 最新版本 v1.2.0
+
+> **上游瞎了，也要有人说。**
+>
+> 之前所有判断都落在「磁盘上有没有新文件」。可「没有新文件」至少四种原因：摄像头离线、
+> 通道没开录像、画面静止没触发、**EasyNVR 自己挂了或授权过期**。前三种是被监控对象的
+> 事，第四种是**监控工具的上游没了** —— 它偏偏长得和「家里没人」一模一样：所有通道一起
+> 安静。这时候最需要有人告诉你「不是没动静，是眼睛没了」。
+>
+> - 新配置卡「源端服务巡检」：开关 / 地址 / 间隔（≥60 秒）/ 到期预警天数 / 「立即巡检」。
+>   只读 EasyNVR 的 `GET /health`，**不需要账号密码**，5 秒超时。
+> - 五档判定：`不可达` / `授权已过期` / `服务异常（status≠ok）` / `授权临期` / `正常`。
+> - **`deadline` 单独判**：授权过期后 `/health` 依然 200、`status` 依然 `ok`，录像却停了。
+>   只盯 `status` 会完美漏掉最要命的那一次。
+> - 地址输入自动规整成 `scheme://host:port` —— 粘整条 `/cloud/#/login` 页面地址也不会
+>   变成「返回的不是 JSON」的天书。
+> - 去重：等级变化即推；同等级按「重复提醒间隔」；**临期按天重推一次**（拖一天少一天，
+>   不该被静默到过期）；不套用告警推送时段（监控失效比半夜被吵醒严重）；恢复补一条。
+> - **手动巡检不动告警状态机**，否则后台下一轮以为「已经通知过」，把你手动点出来的发现吞掉。
+>
+> 自检 415 → **446 项**。完整列表见 [CHANGELOG.md](CHANGELOG.md)。
+
+### 上一版 v1.1.9
 
 > **日志从配置页里搬出来，单独一页。**
 >
@@ -185,7 +207,7 @@
 erm-fpk/
 ├── build.sh               一键构建（权限校准 + JSON/manifest 校验 + py_compile + fnpack）
 ├── gen_icons.py           生成 64/256 图标（纯标准库，无 Pillow）
-├── selftest.py            255 项断言的自检（不联网，除本地 mock）
+├── selftest.py            446 项断言的自检（不联网，除本地 mock）
 ├── mock_webhook.py        本地 mock 钉钉/企微/飞书（验收推送链路用）
 ├── preview_proxy.py       不登录 fnOS 也能看页面（只读转发，仅供调试）
 ├── docs/                  截图与实测报告
@@ -203,6 +225,7 @@ erm-fpk/
     └── app/               ← 内容直接铺到 $TRIM_APPDEST（没有 app/ 这一层）
         ├── server.py      网关（Unix Socket）+ 监控线程（同一进程）
         ├── monitor.py     扫描 / 判定 / 日报 / 调度
+        ├── nvrhealth.py   EasyNVR /health 巡检（上游挂了 / 授权过期）★v1.2.0
         ├── notify.py      推送（urllib，钉钉加签，校验 HTTP+业务码）
         ├── config.py      强类型配置与原子写
         ├── scripts/apply_wizard.py   向导值 → config.json
@@ -222,7 +245,7 @@ erm-fpk/
 
 ```bash
 bash build.sh                 # 产出 dist/erm.fpk
-PYTHONPATH= python3 selftest.py   # 255 项断言（先跑这个再打包）
+PYTHONPATH= python3 selftest.py   # 446 项断言（先跑这个再打包）
 bash gen_icons.py             # 只有换图标时才需要
 ```
 
@@ -413,7 +436,7 @@ PYTHONPATH= python3 check_fnpack.py     # 期望 FNPCK_OK（31 项）
 
 ## 8. 自检覆盖
 
-`selftest.py` 255 项断言，重点回归原文档的每个坑：
+`selftest.py` 446 项断言，重点回归原文档的每个坑：
 
 | 断言 | 对应问题 |
 | --- | --- |
@@ -425,6 +448,8 @@ PYTHONPATH= python3 check_fnpack.py     # 期望 FNPCK_OK（31 项）
 | HTTP 200 + errcode=310000 → 判失败 | "已推送"其实没发出去 |
 | 加签 sign 与官方算法逐位一致 | 钉钉「加签」 |
 | config 0600 / 原子写无残留 | webhook 泄露与半截 JSON |
+| 授权过期但 `/health` 仍 200 + `ok` → 判 `expired` | 只盯 `status` 会漏掉最要命的一次（v1.2.0） |
+| 手动巡检后 `alerting` 不变 | 手动看过后台就沉默，等于吞掉这次发现（v1.2.0） |
 
 ### 邮件渠道单独自检
 

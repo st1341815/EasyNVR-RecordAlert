@@ -44,6 +44,14 @@ DEFAULT_CONFIG = {
     # mixed 模式的「白天」区间：只有这段时间按连续录像要求
     "record_mode_day_from": "07:00",
     "record_mode_day_to": "19:00",
+    # ---- 源端 EasyNVR 服务巡检（v1.2.0 P0）----
+    # 录像文件的 mtime 只能证明「有没有录」，证明不了「EasyNVR 自己还活着」。
+    # 服务挂了 / 授权过期时，所有通道会一起静默，看起来跟「家里没人」一模一样。
+    # GET /health 不需要凭据，顺手探一次就能把这两件事分开；填了地址并打开才会真去探。
+    "nvr_health_enabled": False,
+    "nvr_base_url": "",                # 如 http://192.168.11.6:10000（只保留 scheme://host:port）
+    "nvr_health_interval": 300,        # 秒，>=60
+    "nvr_expire_warn_days": 7,         # 授权剩余 ≤ N 天开始提醒，0 = 不提醒
     # 扫描与告警
     "scan_interval": 300,              # 秒，>=30
     "alert_threshold_minutes": 60,     # 分钟，>=1
@@ -332,6 +340,18 @@ def normalize(raw):
     cfg["scan_interval"] = as_int(cfg.get("scan_interval"), 300, 30)
     cfg["alert_threshold_minutes"] = as_int(cfg.get("alert_threshold_minutes"), 60, 1)
     cfg["alert_silence_minutes"] = as_int(cfg.get("alert_silence_minutes"), 120, 0)
+    # ---- 源端服务巡检（v1.2.0 P0）----
+    cfg["nvr_health_enabled"] = as_bool(cfg.get("nvr_health_enabled"), False)
+    # 地址只留 scheme://host:port：用户常把 /cloud/ 或整条页面地址粘进来，
+    # 原样保留会让请求打到首页 HTML 上，报「返回的不是 JSON」，难查。
+    url = str(cfg.get("nvr_base_url") or "").strip().rstrip("/")
+    if url:
+        _u = urllib_parse(url)
+        if _u.scheme and _u.netloc:
+            url = "%s://%s" % (_u.scheme.lower(), _u.netloc)
+    cfg["nvr_base_url"] = url
+    cfg["nvr_health_interval"] = as_int(cfg.get("nvr_health_interval"), 300, 60)
+    cfg["nvr_expire_warn_days"] = as_int(cfg.get("nvr_expire_warn_days"), 7, 0, 365)
     cfg["notify_recovery"] = as_bool(cfg.get("notify_recovery"), True)
     # 旧配置里没有这个键 → 默认开（升级后行为不变，不会突然停掉日报）
     cfg["daily_report_enabled"] = as_bool(cfg.get("daily_report_enabled"), True)

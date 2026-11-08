@@ -564,6 +564,45 @@
     </div>
 
     <div class="card">
+      <h2>源端服务巡检</h2>
+      <div class="hint" style="margin:0 0 12px">
+        EasyNVR 自己的 <code>/health</code> 接口，<b>不需要账号密码</b>。填上地址并启用后，
+        它挂掉或授权到期会单独告警 —— 否则所有通道一起静默时，看起来和「家里没人」一模一样。
+      </div>
+      <div class="checks">
+        <label><input type="checkbox" id="nvr_health_enabled"> 启用服务巡检</label>
+      </div>
+      <div class="grid" style="margin-top:12px">
+        <div>
+          <label>EasyNVR 地址</label>
+          <input type="text" id="nvr_base_url" placeholder="http://192.168.11.6:10000">
+        </div>
+        <div>
+          <label>巡检间隔（秒）</label>
+          <input type="number" id="nvr_health_interval" min="60" step="60" style="max-width:150px">
+        </div>
+        <div>
+          <label>授权到期提前提醒（天）</label>
+          <input type="number" id="nvr_expire_warn_days" min="0" max="365" style="max-width:150px">
+          <div class="hint" style="margin:6px 0 0">0 = 不提醒临期，只在真的过期后告警</div>
+        </div>
+      </div>
+      <div class="row" style="margin-top:14px;align-items:center">
+        <button type="button" id="btnHealth">立即巡检</button>
+        <span class="pill" id="healthPill">未巡检</span>
+        <span class="hint" id="healthInfo" style="margin:0"></span>
+      </div>
+      <div class="msg" id="healthMsg"></div>
+      <div class="notes">
+        · 只读 <code>/health</code>，不碰录像、不改配置；5 秒超时。<br>
+        · 判据顺序：连不上 → 服务自报 status 非 ok → 授权已过期 → 距到期 ≤ 上面的天数 → 正常。<br>
+        · 授权临期一天提醒一次；其它异常按「重复提醒间隔」重推，恢复时补一条「已恢复」。<br>
+        · 这类告警<b>不受「告警推送计划」限制</b> —— 上游瞎了必须当场知道。<br>
+        · 「立即巡检」只探不发：人就在页面上看着，不该顺手再推一条。
+      </div>
+    </div>
+
+    <div class="card">
       <h2>推送渠道</h2>
       <div class="checks">
         <label><input type="checkbox" id="ch_dingtalk"> 钉钉</label>
@@ -1011,6 +1050,11 @@ function fillConfig(cfg){
   setWeekdays('alertWeekdays', cfg.alert_push_weekdays || [1,2,3,4,5,6,7]);
   syncDailyFields();
   set('timezone', cfg.timezone);
+  // 源端服务巡检（v1.2.0 P0）
+  set('nvr_base_url', cfg.nvr_base_url);
+  set('nvr_health_interval', cfg.nvr_health_interval == null ? 300 : cfg.nvr_health_interval);
+  set('nvr_expire_warn_days', cfg.nvr_expire_warn_days == null ? 7 : cfg.nvr_expire_warn_days);
+  $('nvr_health_enabled').checked = !!cfg.nvr_health_enabled;
   set('dingtalk_webhook', cfg.dingtalk_webhook);
   set('dingtalk_secret', cfg.dingtalk_secret);
   set('feishu_webhook', cfg.feishu_webhook);
@@ -1244,6 +1288,33 @@ $('btnBackupNow').onclick = async () => {
 
 $('btnBkRefresh').onclick = () => loadBackups();
 
+/* 源端服务巡检（v1.2.0 P0）：pill 只说四件事 —— 未启用 / 未巡检 / 正常 / 要管。
+   细节全放到右边那行 hint 里，pill 一旦承载太多字，手机上又正好被隐藏掉，等于白做。 */
+function renderHealth(nh){
+  const pill = $('healthPill'), info = $('healthInfo');
+  if (!pill || !nh) return;
+  if (!nh.enabled) {
+    pill.className = 'pill';
+    pill.textContent = '未启用';
+    info.textContent = nh.base_url ? '已填地址但没启用，不会去探测' : '';
+    info.style.color = '';
+    return;
+  }
+  const needsCare = ['expiring', 'expired', 'bad_status', 'unreachable'].includes(nh.level);
+  pill.className = 'pill ' + (needsCare ? 'bad' : (nh.level === 'ok' ? 'ok' : ''));
+  pill.textContent = nh.label || '未巡检';
+  const bits = [];
+  if (nh.base_url) bits.push(nh.base_url);
+  if (nh.checked_str && nh.checked_str !== '—') bits.push('巡检于 ' + nh.checked_str);
+  if (nh.version) bits.push('版本 ' + nh.version);
+  if (nh.remain_text) {
+    bits.push('授权' + nh.remain_text + (nh.deadline_str ? '（' + nh.deadline_str + ' 到期）' : ''));
+  }
+  if (nh.elapsed_ms) bits.push(nh.elapsed_ms + 'ms');
+  info.textContent = bits.join(' · ');
+  info.style.color = needsCare ? 'var(--danger)' : '';
+}
+
 function render(d){
   $('ver').textContent = 'v' + (d.version || '—');
   const pill = $('statePill');
@@ -1275,6 +1346,7 @@ function render(d){
   if (d.paths && d.paths.log) $('logPath').textContent = '日志文件：' + d.paths.log;
   renderChannels(d);
   if (d.backup) renderBackupStat(d.backup);
+  if (d.nvr_health) renderHealth(d.nvr_health);
   if (d.config && !cfgDirty) fillConfig(d.config);
 }
 
@@ -1306,6 +1378,31 @@ async function act(btn, action, extra, okText){
 }
 
 $('btnScan').onclick = () => act($('btnScan'), 'scan', {}, '检测完成');
+
+/* 「立即巡检」只探不发：人就在页面上看着，再往钉钉/邮箱推一条纯属打扰。
+   真出了事，后台线程会按状态变化自己推。 */
+$('btnHealth').onclick = async () => {
+  const btn = $('btnHealth'), box = $('healthMsg');
+  btn.disabled = true;
+  showMsg(box, '正在巡检…', '');
+  try {
+    const d = await call('nvr_health');
+    render(d);
+    const r = d.nvr_probe || {}, j = r.judge || {};
+    if (!j.level) {
+      showMsg(box, r.skipped === 'disabled'
+        ? '没有启用「源端服务巡检」，这次没有发出请求。'
+        : '巡检没有执行。', 'warn');
+    } else if (j.alert) {
+      showMsg(box, j.reason + '\n（本次只显示结果，不推送；后台巡检到点才会推）', 'warn');
+    } else {
+      showMsg(box, '服务正常' + (j.version ? ' · ' + j.version : '') +
+              (j.remain_text ? ' · 授权' + j.remain_text : ''), 'ok');
+    }
+  } catch (e) {
+    showMsg(box, '巡检失败：' + e.message, 'bad');
+  } finally { btn.disabled = false; }
+};
 $('btnTest').onclick = async () => {
   const btn = $('btnTest'); btn.disabled = true;
   try {
@@ -1358,6 +1455,10 @@ $('btnSave').onclick = async () => {
     alert_window_to: $('alert_window_to').value || '23:59',
     alert_push_weekdays: getWeekdays('alertWeekdays'),
     timezone: $('timezone').value.trim() || 'Asia/Shanghai',
+    nvr_health_enabled: $('nvr_health_enabled').checked,
+    nvr_base_url: $('nvr_base_url').value.trim(),
+    nvr_health_interval: $('nvr_health_interval').value || 300,
+    nvr_expire_warn_days: $('nvr_expire_warn_days').value === '' ? 7 : $('nvr_expire_warn_days').value,
     enabled_push_channels: ['dingtalk','feishu','wechat','email'].filter(k => $('ch_' + k).checked),
     notify_recovery: $('notify_recovery').checked,
     dingtalk_webhook: $('dingtalk_webhook').value.trim(),

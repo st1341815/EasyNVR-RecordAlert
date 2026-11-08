@@ -30,7 +30,7 @@ from urllib.parse import parse_qs, urlparse
 
 APP_NAME = "erm"
 GATEWAY_PREFIX = "/app/" + APP_NAME
-VERSION = "1.1.9"
+VERSION = "1.2.0"
 # 请求体上限：导入备份是唯一的大请求（备份文件正常十几 KB）。
 # 超限在读完之前就拒绝，别把几百 MB 先读进内存再报错。
 MAX_BODY_BYTES = 12 * 1024 * 1024
@@ -45,6 +45,7 @@ import backup as B          # noqa: E402
 import config as C          # noqa: E402
 import monitor as M         # noqa: E402
 import notify as N          # noqa: E402
+import nvrhealth as NH      # noqa: E402
 import stats as S           # noqa: E402
 
 LOCK = threading.RLock()          # 保护 CFG / STATE 的读写
@@ -143,6 +144,15 @@ def validate(cfg):
     bad_extras = [p for p in (cfg.get("backup_extra_files") or []) if not os.path.isabs(p)]
     if bad_extras:
         warnings.append("额外文件里有非绝对路径，备份时会跳过：%s" % "、".join(bad_extras[:3]))
+
+    # ---- 源端服务巡检（v1.2.0 P0）----
+    # 启用却没填地址 = 打开了一个永远探不成的开关，用 error 拦住；
+    # 填了地址却没启用 = 配了但没生效，用 warning 提醒（不影响保存）。
+    if cfg.get("nvr_health_enabled") and not cfg.get("nvr_base_url"):
+        errors.append("「源端服务巡检」已启用，但没填 EasyNVR 地址"
+                      "（如 http://192.168.11.6:10000）")
+    elif cfg.get("nvr_base_url") and not cfg.get("nvr_health_enabled"):
+        warnings.append("填了 EasyNVR 地址但「源端服务巡检」没启用，不会去探测")
     return warnings, errors
 
 
@@ -253,7 +263,26 @@ def status_payload():
         "warnings": warnings,
         "errors": errors,
         "backup": backup_summary(cfg, st),
+        "nvr_health": nvr_health_summary(cfg, st),
     }
+
+
+def nvr_health_summary(cfg, st=None):
+    """「源端服务巡检」给页面用的一小份摘要（v1.2.0 P0）。
+
+    配置项与巡检结果分开给：页面上的开关/地址要能回显，最近一次判定要能展示，
+    两者都缺一不可 —— 只有结果的话，用户关掉开关后会看到一串过期状态以为还在跑。
+    """
+    st = st if isinstance(st, dict) else STATE
+    nh = NH.summary(st)
+    nh["enabled"] = bool(cfg.get("nvr_health_enabled"))
+    nh["base_url"] = cfg.get("nvr_base_url") or ""
+    nh["interval"] = int(cfg.get("nvr_health_interval") or 300)
+    nh["warn_days"] = int(cfg.get("nvr_expire_warn_days") or 0)
+    nh["checked_str"] = M.fmt_ts(cfg, nh.get("checked_at") or 0)
+    dl = nh.get("deadline_ts") or 0
+    nh["deadline_str"] = M.fmt_ts(cfg, dl) if dl else ""
+    return nh
 
 
 def backup_summary(cfg, st=None):
@@ -375,6 +404,14 @@ def handle_action(body, query):
 
     if act == "doctor":
         return doctor_payload()
+
+    if act == "nvr_health":
+        # 「立即巡检」只探不发：用户就在页面上盯着结果，这时候再往钉钉/邮箱推一条
+        # 纯属打扰。真出了事，后台线程自己会按状态变化推。
+        res = NH.check(get_cfg(), STATE, push=False, lock=SCAN_LOCK)
+        out = status_payload()
+        out["nvr_probe"] = res
+        return out
 
     # ---- 备份（v1.1.0）----
     if act == "backup_now":
@@ -645,6 +682,36 @@ def start_backup():
     return th
 
 
+def start_health():
+    th = threading.Thread(target=health_loop, name="erm-health", daemon=True)
+    th.start()
+    return th
+
+
+def health_loop():
+    """源端 EasyNVR 服务巡检（v1.2.0 P0）。
+
+    为什么单独一个线程：探测是网络请求，最长 5 秒超时。塞进 monitor_loop 会让
+    「到点扫描」被上游的一次卡顿拖后；而且它俩写的 state 键完全不重叠
+    （nvr_health vs channels/last_result），没必要互等。
+    开关关掉时把 next_tick 归零：重新打开就立刻探一次，而不是等满一个间隔。
+    """
+    next_tick = 0.0
+    while not STOP_EVENT.is_set():
+        try:
+            cfg = get_cfg()
+            if cfg.get("nvr_health_enabled"):
+                if time.time() >= next_tick:
+                    NH.check(cfg, STATE, push=True, lock=SCAN_LOCK)
+                    next_tick = time.time() + max(60, int(cfg["nvr_health_interval"]))
+            else:
+                next_tick = 0.0
+        except Exception as e:
+            log.exception("服务巡检异常: %s", e)
+            next_tick = time.time() + 120
+        STOP_EVENT.wait(15)
+
+
 def backup_loop():
     """定时备份：每 15 秒看一眼到点没有。
 
@@ -698,6 +765,7 @@ def main():
 
     start_monitor()
     start_backup()
+    start_health()
 
     try:
         server = UnixHTTPServer(SOCK_PATH, Handler)

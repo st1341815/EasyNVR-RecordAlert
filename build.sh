@@ -19,7 +19,7 @@ echo "[2/6] 校准权限"
 find "$PKG" -type d -exec chmod 755 {} +
 chmod 755 "$PKG"/cmd/*
 chmod 755 "$PKG"/app/server.py "$PKG"/app/monitor.py "$PKG"/app/config.py \
-          "$PKG"/app/notify.py "$PKG"/app/scripts/*.py
+          "$PKG"/app/notify.py "$PKG"/app/nvrhealth.py "$PKG"/app/scripts/*.py
 find "$PKG" -type f ! -path "$PKG/cmd/*" ! -name '*.py' -exec chmod 644 {} +
 
 echo "[3/6] 校验 JSON 文件（privilege / resource / wizard / ui/config）"
@@ -60,7 +60,7 @@ TMPVAR="$(mktemp -d)"
 TRIM_PKGVAR="$TMPVAR" python3 -c "
 import sys
 sys.path.insert(0, '$PKG/app')
-import config, monitor, notify, server
+import config, monitor, notify, nvrhealth, server
 print('   import ok:', server.VERSION)
 "
 rm -rf "$TMPVAR"

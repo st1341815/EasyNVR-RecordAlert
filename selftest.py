@@ -1338,6 +1338,91 @@ def test_uninstall_wizard():
     ok("backup_dir" not in sh, "卸载脚本：不碰用户自选的备份目录")
 
 
+def test_nvr_health():
+    """源端服务巡检（v1.2.0 P0）：/health 探测、五档判定、去重、手动不污染状态机。"""
+    import nvrhealth as NH
+
+    for k in ("nvr_health_enabled", "nvr_base_url", "nvr_health_interval",
+              "nvr_expire_warn_days"):
+        ok(k in C.DEFAULT_CONFIG, "巡检：默认值里有 %s" % k)
+
+    # ① 地址规整：用户粘贴的常是页面地址，也得能落到 /health
+    cfg = C.normalize({"nvr_health_enabled": True,
+                       "nvr_base_url": "http://192.168.11.6:10000/cloud/#/login"})
+    eq(cfg["nvr_base_url"], "http://192.168.11.6:10000", "巡检：地址只留 scheme://host:port")
+    eq(NH.health_url(cfg), "http://192.168.11.6:10000/health", "巡检：拼出 /health")
+    eq(NH.health_url(C.normalize({})), "", "巡检：没填地址不拼 URL")
+
+    base = {"nvr_health_enabled": True, "nvr_base_url": "http://nvr:10000",
+            "nvr_expire_warn_days": 7, "alert_silence_minutes": 120}
+    cfg = C.normalize(base)
+
+    def pr(data=None, ok_=True, err=""):
+        return {"ok": ok_, "url": "http://nvr:10000/health", "data": data or {},
+                "error": err, "elapsed_ms": 2}
+
+    # ② 判定五档（顺序有意义：连不上 > 状态异常 > 过期 > 临期 > 正常）
+    eq(NH.judge(cfg, pr({"status": "ok"}))["level"], "ok", "巡检：无 deadline 视为正常")
+    eq(NH.judge(cfg, pr(ok_=False, err="连接被拒绝"))["level"], "unreachable",
+       "巡检：连不上 = 不可达")
+    eq(NH.judge(cfg, pr({"status": "error"}))["level"], "bad_status", "巡检：status 非 ok")
+    dl_past = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")
+    eq(NH.judge(cfg, pr({"status": "ok", "deadline": dl_past}))["level"], "expired",
+       "巡检：授权已过期")
+    dl_soon = (datetime.now() + timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
+    j = NH.judge(cfg, pr({"status": "ok", "deadline": dl_soon}))
+    eq(j["level"], "expiring", "巡检：授权临期")
+    ok("剩余" in j["reason"], "巡检：临期文案带剩余天数", j["reason"])
+    eq(NH.judge(C.normalize(dict(base, nvr_expire_warn_days=0)),
+                pr({"status": "ok", "deadline": dl_soon}))["level"], "ok",
+       "巡检：预警天数 0 = 不提醒临期")
+
+    # ③ 状态机：首次推 / 同一异常静默 / 恢复补一条
+    state = {}
+    NH.probe = lambda cfg, timeout=5: pr(ok_=False, err="连接被拒绝")
+    NH.push_all = lambda cfg, text: [{"channel": "dingtalk", "ok": True, "detail": "ok"}]
+    eq(NH.check(cfg, state, push=True)["event"], "alert", "巡检：首次不可达要推")
+    eq(NH.check(cfg, state, push=True)["event"], "", "巡检：同一异常按静默间隔不重复推")
+    NH.probe = lambda cfg, timeout=5: pr({"status": "ok", "version": "v7.7.421"})
+    r = NH.check(cfg, state, push=True)
+    eq(r["event"], "recovery", "巡检：恢复补一条")
+    ok("已恢复" in r["text"], "巡检：恢复文案正确", r["text"][:40])
+
+    # ④ 推送全失败要回滚时间戳，否则限流一次就丢一整个静默期
+    st_fail = {}
+    NH.probe = lambda cfg, timeout=5: pr(ok_=False, err="连接被拒绝")
+    NH.push_all = lambda cfg, text: [{"channel": "dingtalk", "ok": False, "detail": "限流"}]
+    NH.check(cfg, st_fail, push=True)
+    eq(st_fail["nvr_health"].get("last_alert_time", 0), 0, "巡检：推送失败不回写时间戳")
+    NH.push_all = lambda cfg, text: [{"channel": "-", "ok": False, "detail": "未启用任何推送渠道"}]
+    st_nochan = {}
+    NH.check(cfg, st_nochan, push=True)
+    ok(st_nochan["nvr_health"].get("last_alert_time", 0) > 0,
+       "巡检：没配渠道时不算失败（不每轮重推）")
+
+    # ⑤ 手动巡检只探不发，且不许污染告警状态机
+    st2 = {}
+    NH.probe = lambda cfg, timeout=5: pr(ok_=False, err="连接被拒绝")
+    NH.check(cfg, st2, push=False)
+    eq(st2["nvr_health"].get("alerting"), None, "巡检：手动巡检不写 alerting")
+    eq(NH.check(cfg, st2, push=True)["event"], "alert", "巡检：手动看过后后台仍要正常推")
+
+    # ⑥ 开关关掉就完全不发请求
+    called = []
+    NH.probe = lambda cfg, timeout=5: (called.append(1), pr({}))[1]
+    NH.check(C.normalize({}), {}, push=True)
+    eq(called, [], "巡检：没启用时不发请求")
+
+    # ⑦ UI：字段与按钮都在，保存时带上这四个键
+    html = open(os.path.join(APP, "www", "index.html"), encoding="utf-8").read()
+    for el in ("nvr_health_enabled", "nvr_base_url", "nvr_health_interval",
+               "nvr_expire_warn_days", "btnHealth", "healthPill"):
+        ok('id="%s"' % el in html, "UI：有 %s" % el)
+    ok("nvr_health_enabled: $('nvr_health_enabled').checked" in html,
+       "UI：保存时带上巡检开关")
+    ok("renderHealth(d.nvr_health)" in html, "UI：状态栏渲染巡检结果")
+
+
 def main():
     print("== erm 自检开始（数据目录 %s）" % TMP_VAR)
     srv, webhook = start_mock()
@@ -1347,7 +1432,7 @@ def main():
                    test_scan_alert_and_silence, test_daily_schedule, test_report_text,
                    test_push_plan_and_report_window, test_stats,
                    test_normalize_keeps_secret, test_ui_shell, test_backup,
-                   test_uninstall_wizard):
+                   test_uninstall_wizard, test_nvr_health):
             fn()
         test_push(webhook)
         test_rate_limit_retry(webhook)

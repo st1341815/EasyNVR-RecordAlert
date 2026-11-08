@@ -459,16 +459,88 @@ def online_text(path, exts, latest):
     return fmt_duration(online_seconds(path, exts, latest))
 
 
+# ---------------------------------------------------------------- 源端录像方式（v1.1.7）
+# 「多久没有新录像 = 断流」这条判据成立的前提是摄像头一直在写文件。
+# 移动侦测下这个前提不成立，所以先问清楚用户源端是怎么录的，再决定怎么判。
+
+def record_mode(cfg):
+    """真正生效的录像方式。留空/填入非法值 → 按 continuous（不让升级实例停摆）。"""
+    mode = str((cfg or {}).get("record_mode") or "").strip().lower()
+    return mode if mode in C.RECORD_MODES else "continuous"
+
+
+def record_mode_chosen(cfg):
+    """用户是否明确选过。页面靠它提示「未选择，暂按连续录像处理」。"""
+    return str((cfg or {}).get("record_mode") or "").strip().lower() in C.RECORD_MODES
+
+
+def record_mode_text(cfg):
+    """一句话说明当前判据前提（概览页、告警文案都用它）。"""
+    mode = record_mode(cfg)
+    if not record_mode_chosen(cfg):
+        return "未选择（暂按全天连续录像判定）"
+    if mode == "motion":
+        return "%s：连续 %d 分钟没有新录像才算异常" % (
+            C.RECORD_MODE_LABEL[mode], cfg.get("record_mode_motion_max_minutes", 1440))
+    if mode == "mixed":
+        return "%s：白天 %s–%s 按连续录像要求，其余时间按侦测放过" % (
+            C.RECORD_MODE_LABEL[mode],
+            cfg.get("record_mode_day_from"), cfg.get("record_mode_day_to"))
+    return "%s：%s" % (C.RECORD_MODE_LABEL[mode], C.RECORD_MODE_NOTE[mode])
+
+
+def _day_anchor_ts(now_dt_, from_min):
+    """mixed 模式「白天起点」的时间戳。
+
+    为什么要它：夜间按侦测放过，早上 07:00 进白天时，硬盘里最后一条录像可能是
+    凌晨 01:00（夜里没人走动），若直接拿最后录像时间算闲置，一进白天就立刻误报
+    「已 360 分钟没有新增录像」。所以白天的闲置从 max(最后录像, 白天起点) 算起。
+    """
+    d = now_dt_.replace(hour=from_min // 60, minute=from_min % 60,
+                        second=0, microsecond=0)
+    if int(d.timestamp()) > int(now_dt_.timestamp()):
+        d -= timedelta(days=1)
+    return int(d.timestamp())
+
+
+def record_judge(cfg, now_dt_=None):
+    """决定这一轮怎么判 silent。
+
+    返回 {"mode", "threshold", "anchor"}：
+      threshold = None → 当前时段不判断流（mixed 的夜间）
+      anchor    != None → 闲置从 max(最后录像, anchor) 起算（mixed 的白天）
+    """
+    now_dt_ = now_dt_ or now_dt(cfg)
+    mode = record_mode(cfg)
+    out = {"mode": mode, "threshold": cfg["alert_threshold_minutes"] * 60, "anchor": None}
+    if mode == "motion":
+        out["threshold"] = cfg["record_mode_motion_max_minutes"] * 60
+    elif mode == "mixed":
+        day_from = hm_to_min(cfg.get("record_mode_day_from"), 7 * 60)
+        day_to = hm_to_min(cfg.get("record_mode_day_to"), 19 * 60)
+        if _in_window(now_dt_.hour * 60 + now_dt_.minute, day_from, day_to):
+            out["anchor"] = _day_anchor_ts(now_dt_, day_from)
+        else:
+            out["threshold"] = None
+    return out
+
+
 def evaluate(cfg, now=None, with_counts=True, window=None):
     """逐个通道判定，页面与告警逻辑共用。"""
     now_dt_ = now or now_dt(cfg)
     now_ts = int(now_dt_.timestamp())
     exts = set(cfg.get("video_exts") or C.DEFAULT_CONFIG["video_exts"])
-    threshold_s = cfg["alert_threshold_minutes"] * 60
+    judge = record_judge(cfg, now_dt_)
+    threshold_s = judge["threshold"]          # None = 当前时段不判断流
+    anchor_ts = judge["anchor"]
     root = cfg.get("record_root") or ""
 
     result = {"root": root, "checked_at": now_ts, "channels": [], "error": "",
-              "layout": (cfg.get("channel_layout") or "camera")}
+              "layout": (cfg.get("channel_layout") or "camera"),
+              "record_mode": judge["mode"],
+              "record_mode_set": record_mode_chosen(cfg),
+              "record_mode_text": record_mode_text(cfg),
+              "judge_threshold_min": (None if threshold_s is None else threshold_s // 60)}
     if not root:
         result["error"] = "未配置录像目录"
         return result
@@ -494,7 +566,7 @@ def evaluate(cfg, now=None, with_counts=True, window=None):
         item = {"channel": ch["channel"], "label": ch["label"], "path": ch["path"],
                 "layout": ch.get("layout"), "profiles": ch.get("profiles") or [],
                 "status": "ok", "latest": 0, "latest_str": "—", "idle_min": None,
-                "online_str": "—", "files": 0, "files_window": 0}
+                "silent_min": None, "online_str": "—", "files": 0, "files_window": 0}
         if not path.exists() or not path.is_dir():
             item["status"] = "missing"
         elif not os.access(str(path), os.R_OK | os.X_OK):
@@ -507,9 +579,17 @@ def evaluate(cfg, now=None, with_counts=True, window=None):
             if sc["latest"] == 0:
                 item["status"] = "no_record"
             else:
-                item["idle_min"] = max(0, (now_ts - sc["latest"]) // 60)
-                item["status"] = "silent" if (now_ts - sc["latest"]) >= threshold_s else "ok"
                 item["latest_str"] = fmt_ts(cfg, sc["latest"])
+                item["idle_min"] = max(0, (now_ts - sc["latest"]) // 60)
+                if threshold_s is None:
+                    # mixed 的夜间：没有新录像是正常的，只记录事实，不判异常
+                    item["status"] = "ok"
+                else:
+                    # 白天 / 连续 / 侦测：闲置从「最后录像」和「白天起点」里更晚的那个算
+                    ref = sc["latest"] if not anchor_ts else max(sc["latest"], anchor_ts)
+                    gap = now_ts - ref
+                    item["silent_min"] = max(0, gap // 60)
+                    item["status"] = "silent" if gap >= threshold_s else "ok"
                 if item["status"] == "ok":      # 正在录像才算在线；断流/无录像显示 —
                     item["online_str"] = online_text(path, exts, sc["latest"]) or "—"
         item["label"] = ch["label"]
@@ -538,8 +618,21 @@ def _alert_reason(cfg, ch):
     if st == "no_record":
         return "近 %d 天内没有任何录像文件（从未录制，或录像已被清空）" % LOOKBACK_DIRS
     if st == "silent":
+        gap = ch.get("silent_min") if ch.get("silent_min") is not None else (ch["idle_min"] or 0)
+        mode = record_mode(cfg)
+        if mode == "motion":
+            return ("已 %d 分钟（约 %.1f 天）没有任何新增录像。移动侦测不会一直在录，"
+                    "但静默超过设定的 %d 分钟基本可判定录像链路已断 —— 请检查 EasyNVR 服务、"
+                    "摄像头供电与网络，以及「录像计划」是否被改掉。"
+                    % (gap, gap / 1440.0, cfg["record_mode_motion_max_minutes"]))
+        if mode == "mixed":
+            return ("白天连续录像时段（%s–%s）内已 %d 分钟没有新增录像（阈值 %d 分钟）。"
+                    "这个时段本应一直在录 —— 请检查录像计划是否被切成了侦测模式，"
+                    "或摄像头是否离线。"
+                    % (cfg.get("record_mode_day_from"), cfg.get("record_mode_day_to"),
+                       gap, cfg["alert_threshold_minutes"]))
         return "已 %d 分钟没有新增录像（阈值 %d 分钟）" % (
-            ch["idle_min"] or 0, cfg["alert_threshold_minutes"])
+            gap, cfg["alert_threshold_minutes"])
     return "状态异常"
 
 
@@ -552,10 +645,11 @@ def build_alert_message(cfg, ch):
         "通道：%s\n"
         "%s"
         "问题：%s\n"
+        "源端录像方式：%s\n"
         "最后录像：%s\n"
         "检测时间：%s\n"
         "请检查 EasyNVR 服务、摄像头与录像目录。"
-        % (channel_title(ch), extra, _alert_reason(cfg, ch),
+        % (channel_title(ch), extra, _alert_reason(cfg, ch), record_mode_text(cfg),
            ch["latest_str"], fmt_ts(cfg, time.time()))
     )
 

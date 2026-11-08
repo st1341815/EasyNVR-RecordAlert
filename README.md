@@ -20,7 +20,28 @@
 > `EasyNVR-RecordAlert-<版本>.fpk` → 飞牛「应用中心 → 手动安装」（**向导不问录像目录与通道**）→ 打开应用填录像目录 → 到「设置 → 授权目录」授权该目录 → 重启应用。
 > 版本变更见 [CHANGELOG.md](CHANGELOG.md)。
 
-### 最新版本 v1.1.6
+### 最新版本 v1.1.7
+
+> **判据的前提，终于变成必选项。**
+>
+> 工具判断「断流」靠的是「多久没有新的录像文件」。这个方法隐含一个前提：摄像头**一直在录**。
+> 而 EasyNVR 的录像计划有三种，这个前提只在第一种下成立 —— 移动侦测的用户深夜没人在车库，
+> 会被判定「断流」并推送告警。**判据没错，是判据的物理前提错了。**
+>
+> - 新增**「源端 EasyNVR 录像方式」，必选**：全天连续录像 / 移动侦测录像 / 白天连续 + 夜间侦测。
+>   选错会天天误报或整夜漏报，所以向导默认落在「全天连续」（与升级前行为一致），
+>   而设置页**不给默认值、未选时后台拒绝保存**。
+> - **移动侦测**不再判定流，改用「最长静默」兜底（默认 24 小时）：一天一个文件都没有，
+>   基本可判定录像链路已断。**白天连续 + 夜间侦测**则白天严判、夜里放过。
+> - mixed 的闲置从 `max(最后录像, 白天起点)` 算起 —— 否则每天早上进白天时，
+>   会因为夜里本来就没录而立刻误报一次。
+> - 告警文案按模式说人话，正文新增 `源端录像方式：` 一行；改完判据字段保存后立即重算页面结果
+>   （只刷新结果，不动告警状态、不推送）。
+>
+> 自检 364 → **404 项**。升级后运行期仍按「全天连续」处理（监控不停），
+> 但请进配置页确认一次。完整说明见 [CHANGELOG.md](CHANGELOG.md)。
+
+### 上一版 v1.1.6
 
 > **推送时段不再吞掉夜里发生的事。**
 >
@@ -34,21 +55,6 @@
 >   （周末连着静默也最多一条）。
 >
 > 自检 354 → **364 项**。完整列表见 [CHANGELOG.md](CHANGELOG.md)。
-
-### 上一版 v1.1.5
-
-> **修「导入备份」在 SMB 共享 / 外接盘上必失败。**
->
-> - 备份目录落在 **SMB 共享、exFAT、FAT32、部分 ntfs-3g** 上时，这些文件系统没有 POSIX
->   权限位，`chmod()` 一律抛 `EPERM`。「立即备份」的 chmod 早包了 try，「导入」的没包、
->   还排在 rename **之前** —— 于是同一个目录：备份一直正常、导入必失败，报
->   `[Errno 1] Operation not permitted: .../erm-backup-xxxx.tmp`。
-> - 抽出 `_tighten()` 共用，chmod 失败只返回布尔、永不抛异常；导入改成**先落盘、
->   再收紧权限** —— 权限位是文件系统的能力，跟内容无关，不该连累一次已经写好的导入。
-> - 真写不进去时区分 `EPERM` / `EACCES` / `EROFS`，追加提示「该磁盘不可写：外接存储、
->   只读挂载，或存储空间异常」，不再甩裸 errno 数字。
->
-> 自检 350 → **354 项**（monkeypatch `os.chmod` 抛 EPERM：导入仍成功、文件仍落盘、界面不弹错）。
 
 ### 上一版 v1.1.4
 
@@ -245,6 +251,7 @@ sudo appcenter-cli install-fpk ./dist/erm.fpk -e ./install.env
 # wizard_record_root=/vol1/1000/easynvr/record
 # wizard_push_dingtalk=启用
 # wizard_dingtalk_webhook=https://oapi.dingtalk.com/robot/send?access_token=xxx
+# wizard_record_mode=continuous      # continuous | motion | mixed（必选，默认 continuous）
 # wizard_scan_interval=60
 # wizard_alert_threshold_minutes=60
 # wizard_daily_report_time=08:00

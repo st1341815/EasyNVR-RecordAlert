@@ -279,6 +279,130 @@ def mk_easynvr_tree(root):
     return root, files
 
 
+def mk_one_cam_tree(root, last_dt, cam="Zm9kd0Q0W1x2"):
+    """单摄像头单 profile 的树，唯一一条录像的 mtime 钉死在 last_dt。
+
+    比 mk_record_tree 更适合测判据：时间完全可控，断言不会因为「跑自检时是几点」而变红。
+    """
+    d = os.path.join(root, cam, "profile_1", last_dt.strftime("%Y%m%d"))
+    os.makedirs(d, exist_ok=True)
+    fp = os.path.join(d, "%s.mp4" % last_dt.strftime("%Y%m%d%H%M%S"))
+    with open(fp, "wb") as f:
+        f.write(b"\0" * 16)
+    ts = last_dt.timestamp()
+    os.utime(fp, (ts, ts))
+    return fp
+
+
+def test_record_mode():
+    """v1.1.7：源端 EasyNVR 录像方式 —— 判据的物理前提，必选项。
+
+    核心不是「加了个下拉」，而是同一个「多久没新录像」在三种录像方式下含义不同：
+      · 全天连续：没新文件 = 一定出问题
+      · 移动侦测：没新文件 = 常态，只能用超长静默兜底
+      · 白天连续+夜间侦测：白天严判，夜里放过
+    """
+    # ---- 归一化：留空就是留空，不替用户兜底成 continuous ----
+    eq(C.normalize({})["record_mode"], "", "录像方式默认为空（不自作主张）")
+    for m in C.RECORD_MODES:
+        eq(C.normalize({"record_mode": m})["record_mode"], m, "录像方式保留 %s" % m)
+    eq(C.normalize({"record_mode": " MOTION "})["record_mode"], "motion", "录像方式容错空格大小写")
+    eq(C.normalize({"record_mode": "bogus"})["record_mode"], "", "非法录像方式 → 空")
+    eq(C.normalize({"record_mode_motion_max_minutes": 0})["record_mode_motion_max_minutes"], 5,
+       "最长静默下限 5 分钟（填 0 不能变成「永不告警」）")
+    eq(C.normalize({})["record_mode_motion_max_minutes"], 1440, "最长静默默认 24 小时")
+    eq(C.normalize({})["record_mode_day_from"], "07:00", "白天起点默认 07:00")
+    eq(C.normalize({})["record_mode_day_to"], "19:00", "白天终点默认 19:00")
+    eq(C.normalize({"record_mode_day_from": "7:5"})["record_mode_day_from"], "07:05", "白天时段规整 HH:MM")
+
+    # ---- 必选校验（server.validate 用它拦保存）----
+    ok(C.record_mode_error({}), "未选择 → 有错误文案", C.record_mode_error({}))
+    ok(C.record_mode_error({"record_mode": "bogus"}), "非法值 → 有错误文案")
+    eq(C.record_mode_error({"record_mode": "continuous"}), "", "选连续录像即通过")
+    eq(C.record_mode_error({"record_mode": "mixed"}), "", "选混合模式即通过")
+
+    real_now = datetime.now()
+    # 同一份录像：最后一条在「昨天 06:00」，观察时刻「昨天 07:30」（白天时段内）
+    day = (real_now - timedelta(days=1)).replace(hour=7, minute=30, second=0, microsecond=0)
+    root1 = os.path.join(TMP_VAR, "mode-day")
+    mk_one_cam_tree(root1, day.replace(hour=6, minute=0))
+    base = {"record_root": root1, "alert_threshold_minutes": "60"}
+    cfg_c = C.normalize(dict(base, record_mode="continuous"))
+    cfg_x = C.normalize(dict(base, record_mode="mixed",
+                             record_mode_day_from="07:00", record_mode_day_to="19:00"))
+    eq(M.evaluate(cfg_c, now=day)["channels"][0]["status"], "silent",
+       "连续录像：07:30 距 06:00 已 90 分钟 → 断流")
+    ev_x = M.evaluate(cfg_x, now=day)
+    eq(ev_x["channels"][0]["status"], "ok",
+       "白天连续+夜间侦测：闲置从白天起点 07:00 算起，只有 30 分钟 → 不误报")
+    eq(ev_x["channels"][0]["silent_min"], 30, "mixed 白天闲置按「max(最后录像, 白天起点)」算")
+    eq(ev_x["record_mode"], "mixed", "结果里带上生效的录像方式")
+    eq(ev_x["record_mode_set"], True, "结果里标记用户已选择")
+    eq(ev_x["judge_threshold_min"], 60, "结果里带上本轮判定阈值")
+
+    # 夜间：连续录像要报，混合模式放过
+    night_root = os.path.join(TMP_VAR, "mode-night")
+    night = day.replace(hour=3, minute=0)
+    mk_one_cam_tree(night_root, night.replace(hour=1, minute=0))
+    nbase = {"record_root": night_root, "alert_threshold_minutes": "60"}
+    eq(M.evaluate(C.normalize(dict(nbase, record_mode="continuous")), now=night)
+       ["channels"][0]["status"], "silent", "连续录像：凌晨 2 小时没录像 → 断流")
+    eq(M.evaluate(C.normalize(dict(nbase, record_mode="mixed",
+                                   record_mode_day_from="07:00",
+                                   record_mode_day_to="19:00")), now=night)
+       ["channels"][0]["status"], "ok",
+       "白天连续+夜间侦测：夜间不判定流（夜里没人是正常的）")
+
+    # 移动侦测：3 小时没文件是常态；超过最长静默才告警
+    mroot = os.path.join(TMP_VAR, "mode-motion")
+    mk_one_cam_tree(mroot, real_now - timedelta(hours=3))
+    mb = {"record_root": mroot, "alert_threshold_minutes": "60"}
+    eq(M.evaluate(C.normalize(dict(mb, record_mode="motion")))["channels"][0]["status"], "ok",
+       "移动侦测：3 小时没录像是常态，不告警（连续录像是要报的）")
+    eq(M.evaluate(C.normalize(dict(mb, record_mode="motion",
+                                   record_mode_motion_max_minutes="120")))
+       ["channels"][0]["status"], "silent", "移动侦测：超过自定义的最长静默 → 告警")
+
+    old_root = os.path.join(TMP_VAR, "mode-motion-old")
+    mk_one_cam_tree(old_root, real_now - timedelta(hours=26))
+    cfg_old = C.normalize({"record_root": old_root, "record_mode": "motion"})
+    ch_old = M.evaluate(cfg_old)["channels"][0]
+    eq(ch_old["status"], "silent", "移动侦测：26 小时一个文件都没有 → 兜底告警")
+    msg = M.build_alert_message(cfg_old, ch_old)
+    ok("移动侦测" in msg, "告警文案说明这是移动侦测判据", msg)
+    ok("源端录像方式" in msg, "告警文案带上「源端录像方式」一行", msg)
+
+    # mixed 白天告警文案要指出是白天时段出的事
+    cfg_x2 = C.normalize(dict(base, record_mode="mixed", alert_threshold_minutes="10",
+                              record_mode_day_from="07:00", record_mode_day_to="19:00"))
+    ch_x2 = {c["channel"]: c for c in M.evaluate(cfg_x2, now=day)["channels"]}[
+        list({c["channel"] for c in M.evaluate(cfg_x2, now=day)["channels"]})[0]]
+    eq(ch_x2["status"], "silent", "mixed：白天阈值压到 10 分钟 → 30 分钟无录像即断流")
+    ok("白天连续录像时段" in M._alert_reason(cfg_x2, ch_x2), "mixed 告警文案点明白天时段")
+
+    # ---- 向导与映射：装的时候就能选，不用装完再进页面 ----
+    pkg = os.path.dirname(APP)
+    for name in ("install", "config"):
+        steps = json.load(open(os.path.join(pkg, "wizard", name), encoding="utf-8"))
+        fields = {it.get("field") for s in steps for it in (s.get("items") or [])}
+        ok("wizard_record_mode" in fields, "向导 %s：有源端录像方式字段" % name)
+    winst = json.load(open(os.path.join(pkg, "wizard", "install"), encoding="utf-8"))
+    sel = [it for s in winst for it in (s.get("items") or [])
+           if it.get("field") == "wizard_record_mode"]
+    eq({o.get("value") for o in (sel[0].get("options") or [])} if sel else set(),
+       set(C.RECORD_MODES), "安装向导：三个选项与 RECORD_MODES 一一对应")
+    eq(sel[0].get("initValue") if sel else None, "continuous",
+       "安装向导：默认落在连续录像（与升级前行为一致，不会凭空多出误报）")
+    aw = open(os.path.join(pkg, "app", "scripts", "apply_wizard.py"), encoding="utf-8").read()
+    ok('"wizard_record_mode", "record_mode"' in aw, "向导值会写进 record_mode")
+
+    html = open(os.path.join(APP, "www", "index.html"), encoding="utf-8").read()
+    ok('id="record_mode"' in html, "页面：有源端录像方式下拉")
+    for m in C.RECORD_MODES:
+        ok('value="%s"' % m in html, "页面：下拉里有 %s 选项" % m)
+    ok("必选" in html, "页面：标明是必选项")
+
+
 def test_easynvr_layout():
     root, _files = mk_easynvr_tree(os.path.join(TMP_VAR, "easynvr"))
     cfg = C.normalize({"record_root": root, "alert_threshold_minutes": "60",
@@ -1201,7 +1325,7 @@ def main():
     srv, webhook = start_mock()
     try:
         for fn in (test_config_types, test_config_io, test_channels_and_evaluate,
-                   test_easynvr_layout, test_online_streak,
+                   test_record_mode, test_easynvr_layout, test_online_streak,
                    test_scan_alert_and_silence, test_daily_schedule, test_report_text,
                    test_push_plan_and_report_window, test_stats,
                    test_normalize_keeps_secret, test_ui_shell, test_backup,

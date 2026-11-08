@@ -26,7 +26,19 @@ import urllib.request
 
 REPO = "st1341815/EasyNVR-RecordAlert"
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VERSION = "1.0.17"
+
+
+def _manifest_version():
+    """版本号只认 erm/manifest 一处 —— 写死在这里的话，发版必漏改（v1.0.17 起漏了 6 个版本）。"""
+    with open(os.path.join(HERE, "erm", "manifest"), encoding="utf-8") as f:
+        for line in f:
+            key, _, value = line.partition("=")
+            if key.strip() == "version":
+                return value.strip()
+    raise SystemExit("erm/manifest 里找不到 version")
+
+
+VERSION = _manifest_version()
 TAG = "v" + VERSION
 ASSET = os.path.join(HERE, "dist", "EasyNVR-RecordAlert-%s.fpk" % VERSION)
 NOTES = os.path.join(HERE, "docs", "release-%s.md" % TAG)

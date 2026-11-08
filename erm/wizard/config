@@ -13,6 +13,30 @@
         "initValue": ""
       },
       {
+        "type": "select",
+        "field": "wizard_record_mode",
+        "label": "源端 EasyNVR 录像方式（留空=不修改）",
+        "initValue": "",
+        "options": [
+          {
+            "label": "不修改",
+            "value": ""
+          },
+          {
+            "label": "全天连续录像",
+            "value": "continuous"
+          },
+          {
+            "label": "移动侦测录像",
+            "value": "motion"
+          },
+          {
+            "label": "白天连续 + 夜间侦测",
+            "value": "mixed"
+          }
+        ]
+      },
+      {
         "type": "text",
         "field": "wizard_alert_threshold_minutes",
         "label": "告警阈值（分钟，留空=不修改）",
@@ -41,7 +65,7 @@
         "field": "wizard_dingtalk_secret",
         "label": "钉钉加签密钥（留空=不修改）",
         "initValue": ""
-     },
+      },
       {
         "type": "text",
         "field": "wizard_wechat_webhook",

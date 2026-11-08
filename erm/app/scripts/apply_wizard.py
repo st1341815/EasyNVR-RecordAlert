@@ -27,6 +27,7 @@ import config as C  # noqa: E402
 MAP = [
     ("wizard_record_root", "record_root", "str"),
     ("wizard_scan_interval", "scan_interval", "int"),
+    ("wizard_record_mode", "record_mode", "str"),
     ("wizard_alert_threshold_minutes", "alert_threshold_minutes", "int"),
     ("wizard_alert_silence_minutes", "alert_silence_minutes", "int"),
     ("wizard_daily_report_enabled", "daily_report_enabled", "bool"),

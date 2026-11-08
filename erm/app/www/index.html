@@ -444,6 +444,12 @@
       <span>下次日报 <b id="mNextDaily">—</b></span>
       <span>告警推送计划 <b id="mPlan">—</b></span>
       <span>通道布局 <b id="mLayout">—</b></span>
+      <span>源端录像方式 <b id="mMode">—</b></span>
+    </div>
+    <div class="msg warn show" id="modeWarn" style="margin-top:12px">
+      <b>还没有选择「源端 EasyNVR 录像方式」。</b>当前暂按「全天连续录像」判定 ——
+      如果你的摄像头是<b>移动侦测</b>（有画面变化才录），没人才是最常见状态，
+      这个判据会天天误报。请到下方「配置」里选一次并保存。
     </div>
     <div class="row" style="margin-top:14px">
       <button class="primary" id="btnScan">立即检测</button>
@@ -473,6 +479,37 @@
         <div>
           <label>录像目录</label>
           <input type="text" id="record_root" placeholder="/vol1/1000/easynvr/record">
+        </div>
+        <div style="grid-column:1/-1">
+          <label>源端 EasyNVR 录像方式 <b style="color:var(--danger)">*必选</b></label>
+          <select id="record_mode">
+            <option value="">请选择…（决定告警判据怎么算）</option>
+            <option value="continuous">全天连续录像（定时录像，一直在写文件）</option>
+            <option value="motion">移动侦测录像（画面有变化才录）</option>
+            <option value="mixed">白天连续 + 夜间侦测</option>
+          </select>
+          <div class="hint" id="recordModeHint"></div>
+          <div class="row" id="modeExtra" style="display:none;gap:26px;margin-top:10px;align-items:flex-start">
+            <div id="modeMotionBox" style="display:none">
+              <label>最长静默（分钟，超过即告警）</label>
+              <input type="number" id="record_mode_motion_max_minutes" min="5" max="10080"
+                     style="max-width:150px">
+              <div class="hint" style="margin:6px 0 0">
+                1440 = 24 小时。移动侦测下一天一个文件都没有，基本可判定录像链路已断。
+              </div>
+            </div>
+            <div id="modeMixedBox" style="display:none">
+              <label>白天时段（这段时间按连续录像严判）</label>
+              <div class="row" style="gap:6px">
+                <input type="text" id="record_mode_day_from" placeholder="07:00" style="max-width:96px">
+                <span class="hint" style="margin:0">至</span>
+                <input type="text" id="record_mode_day_to" placeholder="19:00" style="max-width:96px">
+              </div>
+              <div class="hint" style="margin:6px 0 0">
+                白天超过告警阈值没有新录像 → 告警；其余时间按侦测放过，不判定流。
+              </div>
+            </div>
+          </div>
         </div>
         <div>
           <label>通道布局</label>
@@ -506,6 +543,11 @@
 
       <div class="notes">
         · 录像目录填 EasyNVR 的录像根目录（绝对路径），通道按 <code>&lt;摄像头ID&gt;/profile_N/&lt;日期&gt;/</code> 自动发现，不需要填写通道清单。<br>
+        · <b>源端 EasyNVR 录像方式（必选）</b>是告警判据的物理前提，选错会天天误报或整夜漏报：
+        <b>全天连续录像</b>下「没有新文件」就等于出问题；<b>移动侦测</b>下没新录像是常态，只在「最长静默」时才告警；
+        <b>白天连续 + 夜间侦测</b>则白天按连续录像严判、夜里放过（夜里没人是正常的）。<br>
+        · 「白天连续 + 夜间侦测」的闲置从「最后录像」和「白天起点」里<b>更晚的那个</b>算起 ——
+        否则每天早上进白天时，会因为夜里本来就没录而立刻误报一次。<br>
         · 扫描间隔不低于 30 秒；告警阈值 = 多少分钟没有新增录像就告警。<br>
         · 重复提醒间隔填 <b>0</b> 表示同一异常只提醒一次，恢复后才重新提醒。<br>
         · 每日日报与告警推送计划在下面的「推送渠道」卡片里设置。<br>
@@ -905,10 +947,36 @@ function syncDailyFields(){
 
 $('daily_report_enabled').addEventListener('change', syncDailyFields);
 
+/* ---------- 源端录像方式（v1.1.7，必选）---------- */
+const MODE_HINT = {
+  '': '必选项。它决定「多久没有新录像算异常」怎么算 —— 选错会大量误报或整夜漏报。',
+  continuous: '所有时段都应当持续写文件。超过「告警阈值」没有新文件 → 判定异常，误报最少。',
+  motion: '画面有变化才录，没新录像是常态。只在「最长静默」超过设定值时才告警。',
+  mixed: '下方「白天时段」按连续录像严判；其余时间按侦测放过，不判定流。'
+};
+
+function syncModeFields(){
+  const mode = $('record_mode').value;
+  $('modeExtra').style.display = (mode === 'motion' || mode === 'mixed') ? 'flex' : 'none';
+  $('modeMotionBox').style.display = mode === 'motion' ? 'block' : 'none';
+  $('modeMixedBox').style.display = mode === 'mixed' ? 'block' : 'none';
+  const hint = $('recordModeHint');
+  hint.textContent = MODE_HINT[mode] || '';
+  hint.style.color = mode ? '' : 'var(--danger)';
+}
+
+$('record_mode').addEventListener('change', syncModeFields);
+
 function fillConfig(cfg){
   const set = (id, v) => { const el = $(id); if (el) el.value = v == null ? '' : v; };
   set('record_root', cfg.record_root);
   set('channel_layout', cfg.channel_layout || 'camera');
+  set('record_mode', cfg.record_mode || '');
+  set('record_mode_motion_max_minutes',
+      cfg.record_mode_motion_max_minutes == null ? 1440 : cfg.record_mode_motion_max_minutes);
+  set('record_mode_day_from', cfg.record_mode_day_from || '07:00');
+  set('record_mode_day_to', cfg.record_mode_day_to || '19:00');
+  syncModeFields();
   set('channel_aliases', Object.keys(cfg.channel_aliases || {})
       .map(k => k + '=' + cfg.channel_aliases[k]).join('\n'));
   set('scan_interval', cfg.scan_interval);
@@ -1176,6 +1244,14 @@ function render(d){
   $('mPlan').textContent = (d.push_plan || '—') + (d.push_allowed === false ? '（当前静默）' : '');
   const LAY = {camera:'摄像头聚合', profile:'按 profile 分开'};
   $('mLayout').textContent = (LAY[d.layout] || d.layout || '—') + '·' + (d.channel_count || 0) + ' 个通道';
+  // v1.1.7：源端录像方式 —— 没选过就在页面顶部挂一条醒目提示，别让人以为监控是准的
+  const MODE_TXT = {continuous:'全天连续录像', motion:'移动侦测录像', mixed:'白天连续 + 夜间侦测'};
+  const modeSet = !!d.record_mode_set;
+  const mMode = $('mMode');
+  mMode.textContent = (MODE_TXT[d.record_mode] || d.record_mode || '—') +
+                      (modeSet ? '' : '（未选择·暂按连续）');
+  mMode.style.color = modeSet ? '' : 'var(--danger)';
+  $('modeWarn').style.display = modeSet ? 'none' : 'block';
   $('rootErr').textContent = d.error ? ('⚠ ' + d.error) : '';
   renderChannels(d);
   if (d.backup) renderBackupStat(d.backup);
@@ -1234,9 +1310,21 @@ $('btnDaily').onclick = async () => {
 };
 
 $('btnSave').onclick = async () => {
+  // 源端录像方式必选：不选就不让保存（后台也会再拦一次，这里只是不让用户白等）
+  if (!$('record_mode').value) {
+    showMsg($('saveMsg'),
+      '请先选择「源端 EasyNVR 录像方式」—— 这是必选项，它决定告警判据怎么算。', 'bad');
+    $('record_mode').focus();
+    $('record_mode').scrollIntoView({block: 'center', behavior: 'smooth'});
+    return;
+  }
   const cfg = {
     record_root: $('record_root').value.trim(),
     channel_layout: $('channel_layout').value,
+    record_mode: $('record_mode').value,
+    record_mode_motion_max_minutes: $('record_mode_motion_max_minutes').value || 1440,
+    record_mode_day_from: $('record_mode_day_from').value.trim() || '07:00',
+    record_mode_day_to: $('record_mode_day_to').value.trim() || '19:00',
     channel_aliases: $('channel_aliases').value,
     scan_interval: $('scan_interval').value,
     alert_threshold_minutes: $('alert_threshold_minutes').value,

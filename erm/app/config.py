@@ -29,6 +29,21 @@ DEFAULT_CONFIG = {
     "channel_layout": "camera",
     # 摄像头别名：{"O27fqV6dYvs3T": "大门", "O27fqV6dYvs3T/profile_1": "大门主码流"}
     "channel_aliases": {},
+    # ---- 源端 EasyNVR 录像方式（v1.1.7，必选）----
+    # 这是「判据的物理前提」，不是显示项：工具判断断流靠的是「多久没有新录像文件」，
+    # 而这个时长在三种录像方式下含义完全不同，选错就会天天误报或整夜漏报。
+    #   continuous = 全天连续录像（定时录像）：没新文件 = 一定出问题了
+    #   motion     = 移动侦测录像：没新文件是常态，只能用「超长静默」兜底
+    #   mixed      = 白天连续 + 夜间侦测：白天照 continuous 判，夜间按 motion 放过
+    # 空字符串 = 还没选（升级上来的老配置）。运行期按 continuous 处理，但设置页会
+    # 拦住保存并提示 —— 宁可让用户明确选一次，也不要猜。
+    "record_mode": "",
+    # motion 模式（以及 mixed 的夜间）最长可接受静默。1440 = 24 小时：
+    # 移动侦测下一天一个文件都没有，基本可以确定是摄像头/录像链路出问题了。
+    "record_mode_motion_max_minutes": 1440,
+    # mixed 模式的「白天」区间：只有这段时间按连续录像要求
+    "record_mode_day_from": "07:00",
+    "record_mode_day_to": "19:00",
     # 扫描与告警
     "scan_interval": 300,              # 秒，>=30
     "alert_threshold_minutes": 60,     # 分钟，>=1
@@ -88,6 +103,35 @@ PUSH_LABEL = {"dingtalk": "钉钉", "feishu": "飞书", "wechat": "企业微信"
 # 邮件加密方式 → 默认端口（用户只改加密方式时把端口纠正到该协议的标准端口）
 SMTP_SECURITY_PORTS = {"ssl": 465, "starttls": 587, "none": 25}
 SMTP_SECURITIES = tuple(SMTP_SECURITY_PORTS)
+
+# 源端 EasyNVR 录像方式（v1.1.7）：判据的物理前提，必选
+RECORD_MODES = ("continuous", "motion", "mixed")
+RECORD_MODE_LABEL = {
+    "continuous": "全天连续录像",
+    "motion": "移动侦测录像",
+    "mixed": "白天连续 + 夜间侦测",
+}
+# 一句话说清每种方式对「没有新录像」的解释 —— 设置页提示与告警文案共用
+RECORD_MODE_NOTE = {
+    "continuous": "任何时段都持续写文件，没有新录像即可判定为异常",
+    "motion": "画面有变化才录，没有新录像是常态；只用超长静默兜底",
+    "mixed": "白天按连续录像要求，夜间按侦测放过（夜间没人是正常的）",
+}
+
+
+def record_mode_error(cfg):
+    """必选项校验：没选/选了个不认识的值就返回错误文案，正常返回空串。
+
+    单独抽成函数是为了让自检能直接测「必选」这件事，不用起 HTTP 服务。
+    """
+    mode = str((cfg or {}).get("record_mode") or "").strip().lower()
+    if not mode:
+        return ("「源端 EasyNVR 录像方式」是必选项，请选择："
+                "全天连续录像 / 移动侦测录像 / 白天连续 + 夜间侦测")
+    if mode not in RECORD_MODES:
+        return "「源端 EasyNVR 录像方式」取值非法：%s（应为 %s）" % (
+            mode, " / ".join(RECORD_MODES))
+    return ""
 
 
 def _app_var() -> Path:
@@ -272,6 +316,18 @@ def normalize(raw):
     # 真实 EasyNVR 布局下 auto 本来就等价于 camera，flat 已经没有意义。
     cfg["channel_layout"] = layout if layout in ("camera", "profile") else "camera"
     cfg["channel_aliases"] = as_alias_map(cfg.get("channel_aliases"))
+
+    # v1.1.7：源端录像方式。这里**不**替用户兜底成 continuous —— 留空就是留空，
+    # 由 record_mode_error() 在保存时拦住。运行期 monitor 会把空值当 continuous
+    # 用（升级上来的实例不至于突然停摆），但配置本身保留「未选择」这个事实。
+    mode = str(cfg.get("record_mode") or "").strip().lower()
+    cfg["record_mode"] = mode if mode in RECORD_MODES else ""
+    # 兜底阈值至少要比普通告警阈值宽，否则选 motion 等于没选（下限 5 分钟，
+    # 上限 7 天：再长就失去「兜底」意义了）
+    cfg["record_mode_motion_max_minutes"] = as_int(
+        cfg.get("record_mode_motion_max_minutes"), 1440, 5, 10080)
+    cfg["record_mode_day_from"] = norm_hhmm(cfg.get("record_mode_day_from"), "07:00")
+    cfg["record_mode_day_to"] = norm_hhmm(cfg.get("record_mode_day_to"), "19:00")
 
     cfg["scan_interval"] = as_int(cfg.get("scan_interval"), 300, 30)
     cfg["alert_threshold_minutes"] = as_int(cfg.get("alert_threshold_minutes"), 60, 1)

@@ -105,6 +105,30 @@
         ]
       },
       {
+        "type": "tips",
+        "helpText": "「源端 EasyNVR 录像方式」是告警判据的物理前提，必选。全天连续录像：任何时间没新文件都算异常（误报最少）；移动侦测：没新录像是常态，只在超长静默时才告警；白天连续+夜间侦测：白天严判、夜间放过。装好后在应用页面里还能改。"
+      },
+      {
+        "type": "select",
+        "field": "wizard_record_mode",
+        "label": "源端 EasyNVR 录像方式（必选）",
+        "initValue": "continuous",
+        "options": [
+          {
+            "label": "全天连续录像（定时录像，一直在写文件）",
+            "value": "continuous"
+          },
+          {
+            "label": "移动侦测录像（画面有变化才录）",
+            "value": "motion"
+          },
+          {
+            "label": "白天连续 + 夜间侦测",
+            "value": "mixed"
+          }
+        ]
+      },
+      {
         "type": "text",
         "field": "wizard_alert_threshold_minutes",
         "label": "告警阈值（分钟无新增录像）",

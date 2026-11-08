@@ -30,7 +30,7 @@ from urllib.parse import parse_qs, urlparse
 
 APP_NAME = "erm"
 GATEWAY_PREFIX = "/app/" + APP_NAME
-VERSION = "1.1.6"
+VERSION = "1.1.7"
 # 请求体上限：导入备份是唯一的大请求（备份文件正常十几 KB）。
 # 超限在读完之前就拒绝，别把几百 MB 先读进内存再报错。
 MAX_BODY_BYTES = 12 * 1024 * 1024
@@ -72,6 +72,16 @@ MIME = {
 def validate(cfg):
     """保存前的体检。返回 warnings（不阻止保存）与 errors（阻止保存）。"""
     warnings, errors = [], []
+    # v1.1.7：源端录像方式是必选项 —— 判据的物理前提，选错会天天误报或整夜漏报，
+    # 所以这里用 error 拦住保存，而不是模棱两可地替用户猜一个。
+    mode_err = C.record_mode_error(cfg)
+    if mode_err:
+        errors.append(mode_err)
+    elif cfg.get("record_mode") == "mixed":
+        if M.hm_to_min(cfg.get("record_mode_day_from"), 7 * 60) == \
+                M.hm_to_min(cfg.get("record_mode_day_to"), 19 * 60):
+            warnings.append("白天时段起止相同，等于全天都按「连续录像」要求判定，"
+                            "「夜间侦测放过」不会生效；如果你的夜间是侦测录像，请把起止分开")
     root = cfg.get("record_root") or ""
     if not root:
         warnings.append("录像目录为空，监控不会工作")
@@ -222,6 +232,11 @@ def status_payload():
         "state": st,
         "channels": last_res.get("channels") or [],
         "layout": last_res.get("layout") or cfg.get("channel_layout") or "camera",
+        # v1.1.7：源端录像方式（判据前提）—— 直接读配置，不走 last_result 缓存：
+        # 它本来就是「配置属性」，不是扫描结果，缓存一份只会让页面显示和下拉框打架。
+        "record_mode": M.record_mode(cfg),
+        "record_mode_set": M.record_mode_chosen(cfg),
+        "record_mode_text": M.record_mode_text(cfg),
         "channel_count": len(last_res.get("channels") or []),
         "root": last_res.get("root") or cfg.get("record_root") or "",
         "error": last_res.get("error") or "",
@@ -290,6 +305,7 @@ def handle_action(body, query):
         if not isinstance(incoming, dict):
             return {"ok": False, "error": "config 必须是对象"}
         merged = dict(get_cfg())
+        old_cfg = dict(merged)                  # 判据字段是否变化，要和保存前比
         merged.update(incoming)
         new_cfg = C.normalize(merged)
         warnings, errors = validate(new_cfg)
@@ -298,8 +314,22 @@ def handle_action(body, query):
         with LOCK:
             CFG = new_cfg
         C.save_config(new_cfg)
+        # 「配置即生效」：改的是判据本身（录像方式/阈值/布局/目录）时，页面上的
+        # 判定结果不能还是上一套判据算出来的。这里只重算 last_result 让页面立刻
+        # 跟上，不动 alerting、不推送 —— 告警/恢复仍由下一轮正式扫描处理，
+        # 免得「只是改了个阈值」就凭空发一轮通知。
+        judge_keys = ("record_mode", "record_mode_motion_max_minutes",
+                      "record_mode_day_from", "record_mode_day_to",
+                      "alert_threshold_minutes", "channel_layout", "record_root")
+        if any(old_cfg.get(k) != new_cfg.get(k) for k in judge_keys):
+            try:
+                with SCAN_LOCK:
+                    STATE["last_result"] = M.evaluate(new_cfg, with_counts=False)
+                C.save_state(STATE)
+            except Exception as exc:                # 重算失败不能让保存失败
+                log.warning("配置已保存，但重算判定失败：%s", exc)
         log.info("配置已更新：%s", json.dumps({k: new_cfg[k] for k in
-                 ("record_root", "channel_layout", "alert_threshold_minutes",
+                 ("record_root", "channel_layout", "record_mode", "alert_threshold_minutes",
                   "daily_report_enabled", "daily_report_time", "enabled_push_channels")},
                  ensure_ascii=False))
         out = status_payload()

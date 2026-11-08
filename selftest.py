@@ -16,6 +16,7 @@
 """
 
 import contextlib
+import errno
 import json
 import os
 import shutil
@@ -1076,6 +1077,23 @@ def test_backup():
     p3 = Path(bkdir) / r3["file"]
     ok(p3.is_file(), "导入：文件确实落在备份目录")
     eq(p3.stat().st_mode & 0o777, 0o600, "导入：文件权限 0600")
+
+    # ⑧a 备份目录在外接盘上（exFAT / FAT32 没有 POSIX 权限位）：chmod 抛 EPERM，
+    #     但文件已经落盘，这次导入必须照样算成功 —— 否则「备份好好的、导入必失败」。
+    _chmod = os.chmod
+
+    def _eperm(p, m, *a, **k):
+        raise OSError(errno.EPERM, "Operation not permitted")
+
+    os.chmod = _eperm
+    try:
+        r4 = B.import_file(icfg, "a.json", imp)
+    finally:
+        os.chmod = _chmod
+    ok(r4["ok"], "导入：文件系统不支持 chmod（外接 exFAT）也照样成功", r4)
+    ok((Path(bkdir) / r4["file"]).is_file(), "导入：chmod 失败时文件仍然落盘")
+    eq(r4.get("error"), None, "导入：chmod 失败不往界面弹错")
+    ok(B._tighten(p3) in (True, False), "导入：_tighten 只返回布尔，永不抛异常")
     row3 = [x for x in B.list_backups(icfg) if x["file"] == r3["file"]]
     ok(row3 and row3[0]["time_str"] == "2026-01-02 03:04:05",
        "导入：列表时间取文件名时间戳（不是导入那一刻的 mtime）", row3)

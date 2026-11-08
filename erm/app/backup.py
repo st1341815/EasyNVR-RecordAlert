@@ -17,6 +17,7 @@
 """
 
 import base64
+import errno
 import json
 import os
 import re
@@ -102,6 +103,20 @@ def dir_status(cfg, create=False):
     if not os.access(str(d), os.W_OK):
         return False, "目录不可写：%s" % d
     return True, str(d)
+
+
+def _tighten(path):
+    """尽力把备份文件收紧到 0600（里面是 webhook / 加签密钥 / SMTP 授权码）。
+
+    **必须容错**：外接盘上的 exFAT / FAT32、部分 ntfs-3g 没有 POSIX 权限位，
+    chmod 直接抛 EPERM（Operation not permitted）—— 这不是写入失败。
+    历史上「立即备份」包了 try，「导入」漏了，表现就是备份好好的、导入必失败。
+    """
+    try:
+        os.chmod(path, 0o600)
+        return True
+    except OSError:
+        return False
 
 
 # ------------------------------------------------------------------ 采集
@@ -211,10 +226,7 @@ def run_backup(cfg, state=None, reason="manual", version="", now=None):
             pass
         return {"ok": False, "error": "写备份失败：%s" % e}
     # 备份里含 webhook / 加签密钥 / SMTP 授权码，别让同机其他账号读到
-    try:
-        os.chmod(path, 0o600)
-    except Exception:
-        pass
+    _tighten(path)
 
     removed = prune(cfg, exclude=name)
     if isinstance(state, dict):
@@ -387,14 +399,18 @@ def import_file(cfg, name, text, version=""):
             f.write(text)
             f.flush()
             os.fsync(f.fileno())
-        os.chmod(tmp, 0o600)
         os.replace(tmp, path)
-    except Exception as e:
+    except OSError as e:
         try:
             tmp.unlink()
         except Exception:
             pass
-        return {"ok": False, "error": "写入备份目录失败：%s" % e}
+        hint = ""
+        if e.errno in (errno.EPERM, errno.EACCES, errno.EROFS):
+            hint = "（该磁盘不可写：外接存储、只读挂载，或存储空间异常）"
+        return {"ok": False, "error": "写入备份目录失败：%s%s" % (e, hint)}
+    # 先落盘再收紧权限：文件系统的权限位与内容无关，chmod 失败不能连累这次导入
+    _tighten(path)
 
     items = list(files) + [str(e.get("path")) for e in extra if isinstance(e, dict) and e.get("path")]
     removed = prune(cfg, exclude=fname)

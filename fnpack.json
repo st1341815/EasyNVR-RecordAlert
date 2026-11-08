@@ -29,8 +29,19 @@
       "install_type": "",
       "is_docker": false,
       "service_port": "",
-      "details_updated_at": "2026-11-08T08:44:00+08:00",
+      "details_updated_at": "2026-11-08T09:02:00+08:00",
       "releases": {
+        "1.1.2": {
+          "changelog": "备份页新增「导入备份」按钮：选一个 erm-backup-*.json 即可收进当前备份目录（不信任上传文件名，服务端重新生成、权限 0600、时间戳沿用内容里的 created_at）；导入只收不套用，仍需在列表点「恢复」。另加 12 MB 请求体上限。自检 331 项。",
+          "updated_at": "2026-11-08T09:02:00+08:00",
+          "packages": {
+            "all": {
+              "download_url": "https://github.com/st1341815/EasyNVR-RecordAlert/releases/download/v1.1.2/EasyNVR-RecordAlert-1.1.2.fpk",
+              "sha256": "b2443ac3d996a2ac656f2ff0f29d00eac7c77ab9b851c785d28508886b080981",
+              "size": 95110
+            }
+          }
+        },
         "1.1.1": {
           "changelog": "备份页宽度收齐到 1080，与概览/配置两页一致：限宽规则漏了 #page-backup，它吃满 1440 而另两页 1080，切页时版面横向跳动。自检 318 项。",
           "updated_at": "2026-11-08T08:44:00+08:00",

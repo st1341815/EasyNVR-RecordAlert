@@ -32,6 +32,7 @@ SUFFIX = ".json"
 NAME_RE = re.compile(r"^erm-backup-\d{8}-\d{6}(?:-\d+)?\.json$")
 
 MAX_EXTRA_BYTES = 2 * 1024 * 1024      # 单个额外文件上限 2 MB
+MAX_IMPORT_BYTES = 8 * 1024 * 1024     # 手动导入的备份文件上限 8 MB（正常十几 KB）
 PEEK_MAX_BYTES = 256 * 1024            # 列表页最多解析这么大的备份文件
 
 # 恢复 config 时**不覆盖**的键（管理面，属于当前实例的部署选择）
@@ -242,6 +243,28 @@ def _peek(path):
         return {}
 
 
+def _hsize(n):
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return ("%d %s" % (n, unit)) if unit == "B" else ("%.1f %s" % (n, unit))
+        n /= 1024.0
+
+
+def _name_time(name):
+    """从备份文件名里取时间（erm-backup-YYYYMMDD-HHMMSS[-n].json）。
+
+    列表用文件名而不是 mtime：手动导入的备份会沿用原始 created_at 当文件名时间戳，
+    它的 mtime 是「导入那一刻」，直接拿 mtime 显示会和文件名/内容自相矛盾。
+    """
+    m = re.match(r"^erm-backup-(\d{8})-(\d{6})", str(name or ""))
+    if not m:
+        return None
+    try:
+        return datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S")
+    except Exception:
+        return None
+
+
 def list_backups(cfg, limit=100):
     d = dir_of(cfg)
     if d is None or not d.is_dir():
@@ -259,10 +282,11 @@ def list_backups(cfg, limit=100):
         except Exception:
             continue
         meta = _peek(p)
+        nt = _name_time(p.name)
         out.append({
             "file": p.name,
             "size": st.st_size,
-            "time_str": now_dt(cfg, st.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+            "time_str": (nt or now_dt(cfg, st.st_mtime)).strftime("%Y-%m-%d %H:%M:%S"),
             "reason": meta.get("reason") or "",
             "items": meta.get("items") or [],
             "version": meta.get("version") or "",
@@ -307,6 +331,84 @@ def prune(cfg, keep=None, exclude=""):
         except Exception:
             pass
     return removed
+
+
+# ------------------------------------------------------------------ 导入
+
+def import_file(cfg, name, text, version=""):
+    """把用户从本机选上来的备份 JSON 收进备份目录。
+
+    两条原则：
+      · 不信任上传方的文件名 —— 一律按自己的命名规则重新生成，避免覆盖已有快照、
+        或借文件名把文件写到备份目录之外。
+      · 只做校验和落盘，不顺手恢复 —— 导入和套用分开，用户还能在列表里核对一眼。
+    文件名时间戳取备份内容里的 created_at（导进来的是三天前的份，就还显示三天前），
+    取不到才退回当前时间。
+    """
+    ok, detail = dir_status(cfg, create=True)
+    if not ok:
+        return {"ok": False, "error": detail}
+    if not isinstance(text, str) or not text.strip():
+        return {"ok": False, "error": "文件是空的"}
+    n = len(text.encode("utf-8"))
+    if n > MAX_IMPORT_BYTES:
+        return {"ok": False, "error": "文件太大（%s，上限 %s）" % (_hsize(n), _hsize(MAX_IMPORT_BYTES))}
+    try:
+        doc = json.loads(text)
+    except Exception as e:
+        return {"ok": False, "error": "不是合法 JSON：%s" % e}
+    if not isinstance(doc, dict) or doc.get("kind") != "erm-backup":
+        return {"ok": False, "error": "不是本应用的备份文件（缺 kind=erm-backup）"}
+    files = doc.get("files")
+    files = files if isinstance(files, dict) else {}
+    extra = doc.get("extra") or []
+    if not isinstance(files.get("config.json"), dict) and not extra:
+        return {"ok": False, "error": "这份备份里既没有 config.json，也没有额外文件，导进来也没用"}
+
+    d = Path(detail)
+    stamp_dt = None
+    ca = str(doc.get("created_at") or "").strip()
+    if ca:
+        try:
+            stamp_dt = datetime.strptime(ca, "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            stamp_dt = None
+    stamp = (stamp_dt or now_dt(cfg)).strftime("%Y%m%d-%H%M%S")
+    base = PREFIX + stamp + SUFFIX
+    fname, k = base, 2
+    while (d / fname).exists():
+        fname = "%s%s-%d%s" % (PREFIX, stamp, k, SUFFIX)
+        k += 1
+    path = d / fname
+
+    tmp = path.with_suffix(".tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except Exception as e:
+        try:
+            tmp.unlink()
+        except Exception:
+            pass
+        return {"ok": False, "error": "写入备份目录失败：%s" % e}
+
+    items = list(files) + [str(e.get("path")) for e in extra if isinstance(e, dict) and e.get("path")]
+    removed = prune(cfg, exclude=fname)
+    return {
+        "ok": True,
+        "file": fname,
+        "original": str(name or ""),
+        "size": n,
+        "items": items,
+        "reason": doc.get("reason") or "imported",
+        "version": doc.get("version") or version,
+        "created_at": doc.get("created_at") or "",
+        "removed": removed,
+    }
 
 
 # ------------------------------------------------------------------ 恢复 / 删除

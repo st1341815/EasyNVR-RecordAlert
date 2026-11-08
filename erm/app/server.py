@@ -30,7 +30,10 @@ from urllib.parse import parse_qs, urlparse
 
 APP_NAME = "erm"
 GATEWAY_PREFIX = "/app/" + APP_NAME
-VERSION = "1.1.1"
+VERSION = "1.1.2"
+# 请求体上限：导入备份是唯一的大请求（备份文件正常十几 KB）。
+# 超限在读完之前就拒绝，别把几百 MB 先读进内存再报错。
+MAX_BODY_BYTES = 12 * 1024 * 1024
 
 SELF = os.path.abspath(__file__)
 APP_DEST = os.path.dirname(SELF)           # app/ 的内容直接铺到 target 根
@@ -377,6 +380,15 @@ def handle_action(body, query):
         out["deleted"] = res
         return out
 
+    if act == "backup_import":
+        # 文件内容由前端读成文本传上来：不解析 multipart，少一套出错的地方。
+        # 只管收进备份目录；要套用请再点列表里的「恢复」—— 导入 ≠ 立即覆盖现网配置。
+        res = B.import_file(get_cfg(), str(body.get("name") or ""),
+                            body.get("content") or "", version=VERSION)
+        out = status_payload()
+        out["imported"] = res
+        return out
+
     return {"ok": False, "error": "未知动作：%s" % act}
 
 
@@ -496,6 +508,15 @@ class Handler(BaseHTTPRequestHandler):
         p, q = self._strip()
         if not (p == "/api" or p.startswith("/api")):
             self._json({"ok": False, "error": "not found"}, 404)
+            return
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except Exception:
+            n = 0
+        if n > MAX_BODY_BYTES:
+            self.close_connection = True
+            self._json({"ok": False, "error": "请求体太大（%s，上限 %s）"
+                        % (B._hsize(n), B._hsize(MAX_BODY_BYTES))}, 413)
             return
         body = self._body()
         try:

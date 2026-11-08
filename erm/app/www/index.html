@@ -751,7 +751,10 @@
         · <b>不备份日志</b>：日志是排障用的过程文件，几十 MB，恢复它反而会把当前日志糊掉。<br>
         · 目录要放在应用能写的卷上（如 <code>/vol3/1000/...</code>）；第一次备份会自动创建。<br>
         · 恢复时会<b>保留当前的备份设置</b>，只回退业务配置——不会出现「恢复完配置，备份功能自己关了」。<br>
-        · 恢复前会自动再存一份 <code>pre-restore</code> 快照，点错了还能退回去。
+        · 恢复前会自动再存一份 <code>pre-restore</code> 快照，点错了还能退回去。<br>
+        · <b>导入备份</b>：换机、重装、或从别的目录捞回一份 <code>erm-backup-*.json</code>，
+        点「导入备份」选文件即可收进当前备份目录；<b>导入不会自动套用</b>，
+        还要在下面列表里点该行的「恢复」才生效。
       </div>
     </div>
   </form>
@@ -766,7 +769,9 @@
     <div class="bk-dir" id="bkDir"></div>
     <div class="row" style="margin-top:12px">
       <button class="primary" type="button" id="btnBackupNow">立即备份</button>
+      <button type="button" id="btnBkImport">导入备份</button>
       <button type="button" id="btnBkRefresh">刷新列表</button>
+      <input type="file" id="bkFile" accept=".json,application/json" hidden>
     </div>
     <div class="msg" id="bkMsg"></div>
   </div>
@@ -1045,6 +1050,35 @@ async function doDelete(btn){
     showMsg($('bkMsg'), '删除失败：' + e.message, 'bad');
   } finally { btn.disabled = false; }
 }
+
+/* 导入备份：浏览器里把文件读成文本直接 POST 上去 —— 不搞 multipart，服务端只做校验和落盘。
+   名字由服务端重新生成（不信任上传的文件名）；只收进备份目录，要套用还得点列表里的「恢复」。 */
+$('btnBkImport').onclick = () => $('bkFile').click();
+$('bkFile').onchange = async () => {
+  const f = $('bkFile').files && $('bkFile').files[0];
+  $('bkFile').value = '';                    // 清掉，允许再选同一个文件
+  if (!f) return;
+  const btn = $('btnBkImport');
+  if (f.size > 8 * 1024 * 1024) {
+    showMsg($('bkMsg'), '文件太大（' + fmtSize(f.size) + '）——备份文件正常只有十几 KB', 'bad');
+    return;
+  }
+  btn.disabled = true;
+  showMsg($('bkMsg'), '正在导入 ' + f.name + '…', '');
+  try {
+    const text = await f.text();
+    const d = await call('backup_import', {name: f.name, content: text});
+    const r = d.imported || {};
+    if (!r.ok) throw new Error(r.error || '导入失败');
+    render(d);
+    showMsg($('bkMsg'), '已导入 ' + r.file + '（' + ((r.items || []).join('、') || '—') + '）' +
+            ((r.removed || []).length ? '；按保留份数清掉 ' + r.removed.length + ' 份旧的' : '') +
+            '\n要套用这份配置，请点下面列表里这一行的「恢复」。', 'ok');
+    loadBackups();
+  } catch (e) {
+    showMsg($('bkMsg'), '导入失败：' + e.message, 'bad');
+  } finally { btn.disabled = false; }
+};
 
 $('bkForm').addEventListener('input', () => { bkDirty = true; });
 $('bkForm').addEventListener('change', () => { bkDirty = true; });

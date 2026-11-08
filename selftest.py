@@ -1055,6 +1055,40 @@ def test_backup():
     ok("'overview', 'config', 'backup'" in html, "UI：键盘切页顺序包含备份")
     ok("#page-config,#page-backup,#page-overview{max-width:1080px" in html,
        "UI：备份页与另两页同宽（1080）")
+    ok('id="btnBkImport"' in html, "UI：有「导入备份」按钮")
+
+    # ⑧ 导入：校验内容、不认上传的文件名、时间戳沿用内容里的 created_at
+    icfg = C.normalize({"backup_dir": str(bkdir), "backup_keep": 0})
+    imp = json.dumps({"kind": "erm-backup", "app": "erm", "reason": "manual",
+                      "created_at": "2026-01-02 03:04:05",
+                      "items": ["config.json"],
+                      "files": {"config.json": {"record_root": "/vol1/imported"}},
+                      "extra": []}, ensure_ascii=False)
+    r3 = B.import_file(icfg, "../etc/passwd", imp)
+    ok(r3["ok"], "导入：合法备份能收下", r3)
+    ok(r3["file"].startswith("erm-backup-20260102-030405"),
+       "导入：文件名沿用内容里的 created_at", r3)
+    ok("/" not in r3["file"] and ".." not in r3["file"],
+       "导入：文件名由服务端重生成，不认上传的名字")
+    p3 = Path(bkdir) / r3["file"]
+    ok(p3.is_file(), "导入：文件确实落在备份目录")
+    eq(p3.stat().st_mode & 0o777, 0o600, "导入：文件权限 0600")
+    row3 = [x for x in B.list_backups(icfg) if x["file"] == r3["file"]]
+    ok(row3 and row3[0]["time_str"] == "2026-01-02 03:04:05",
+       "导入：列表时间取文件名时间戳（不是导入那一刻的 mtime）", row3)
+    ok(not B.import_file(icfg, "a.json", "{not json")["ok"], "导入：非法 JSON 拒绝")
+    ok(not B.import_file(icfg, "a.json", json.dumps({"kind": "other"}))["ok"],
+       "导入：不是本应用的备份拒绝")
+    ok(not B.import_file(icfg, "a.json", "   ")["ok"], "导入：空文件拒绝")
+    ok(not B.import_file(icfg, "a.json", json.dumps({"kind": "erm-backup"}))["ok"],
+       "导入：既没 config 也没额外文件的备份拒绝")
+    _max = B.MAX_IMPORT_BYTES
+    B.MAX_IMPORT_BYTES = 64
+    ok(not B.import_file(icfg, "a.json", imp)["ok"], "导入：超过大小上限拒绝")
+    B.MAX_IMPORT_BYTES = _max
+
+    # ⑨ 导入进来的备份能被 restore 直接吃（文件名合 NAME_RE，恢复链路不用特判）
+    ok(bool(B.NAME_RE.match(r3["file"])), "导入：生成的文件名符合恢复/删除的命名规则")
 
 
 def main():

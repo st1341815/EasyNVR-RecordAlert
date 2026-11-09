@@ -30,7 +30,7 @@ from urllib.parse import parse_qs, urlparse
 
 APP_NAME = "erm"
 GATEWAY_PREFIX = "/app/" + APP_NAME
-VERSION = "1.2.1"
+VERSION = "1.2.2"
 # 请求体上限：导入备份是唯一的大请求（备份文件正常十几 KB）。
 # 超限在读完之前就拒绝，别把几百 MB 先读进内存再报错。
 MAX_BODY_BYTES = 12 * 1024 * 1024

@@ -11,6 +11,40 @@
 - Release 附件：`EasyNVR-RecordAlert-<版本>.fpk`
 - 主题写正文首行 `## v<版本> · 主题`；仓库内构建产物固定 `dist/erm.fpk`
 
+## v1.2.2 · 修复重新安装时 install_init 报错导致安装失败
+
+### 现象
+
+重新安装（卸载后立刻重装）时，应用中心报安装失败，`/var/log/apps/erm.log` 里留了一条：
+
+```
+/vol1/appcenter-downloads/erm-1.2.1-tpk/cmd/install_init: line 9: /vol1/@appdata/erm/python_path: No such file or directory
+```
+
+飞牛事件日志里对应的记录是 `APP_INSTALL_FAILED_INSTALL_INIT_EXCEPTION`（11-07 晚到 11-09 早
+反复卸载重装期间出现了 2 次）。
+
+### 根因
+
+`install_init`（安装前检查）原来干了三件事：`mkdir -p $TRIM_PKGVAR` → 写 `python_path` → 检查
+python3。问题出在前两件：
+
+1. 安装阶段 `TRIM_PKGVAR=/vol1/@appdata/erm` 这个目录**还没建好**，而且 `/vol1/@appdata`
+   本身是 `root:root drwxr-xr-x`——只有 root 能写。`mkdir -p` 会失败，但被 `2>/dev/null` 静默吞掉。
+2. 紧接着下一行 `printf ... > "${VAR}/python_path"` 在目录不存在时硬写，直接报
+   `No such file or directory`，install_init 以非 0 退出，平台记成安装失败。
+
+### 修法
+
+`install_init` 只保留「python3 存在性检查」这一件真正该干的事，不再碰目录、不再写
+`python_path`。写 `python_path` 交给 `install_callback`（它运行时 `TRIM_PKGVAR` 已由平台建好并
+chown 给 `erm`）；即使没写成功，`cmd/main` 的 `pybin()` 也有 `command -v python3` 兜底，
+启动不受影响。
+
+### 附带
+
+- 版本 1.2.1 → 1.2.2（`app/server.py` + `manifest`）。
+
 ## v1.2.1 · 断流清单只盯最近 48 小时（按档位筛）
 
 ### 一、为什么

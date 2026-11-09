@@ -43,7 +43,26 @@
   <img src="docs/preview-5-log.png" width="440" alt="日志页">
 </p>
 
-### 最新版本 v1.2.1
+### 最新版本 v1.2.3
+
+> **断流清单超过 50 行自动折叠。**
+>
+> 「全部」档在通道多、网络抖的夜里能一口气铺两百行，把 KPI、柱状图、热力图全推下屏幕。
+> 现在渲染照旧全量（筛选仍是纯前端、不重新请求），只在展示层收：命中行数 > 50 就只铺前
+> 50 行，底部一条 `已显示前 50 段，N 段已折叠` + `展开剩余 N 段`；展开后按钮变「收起」。
+> 换档位重置为折叠态，15 秒轮询重建后展开态延续；≤50 行时折叠栏整体不出现。
+>
+> 自检（前端 DOM 桩）22 → **43 项**，后端 `selftest.py` 459 项不变。
+
+### v1.2.2 · 修复重新安装时报 install_init 失败
+
+> 重新安装（卸载后立刻重装）会报安装失败，日志里是 `install_init: line 9:
+> /vol1/@appdata/erm/python_path: No such file or directory`。原因是安装前的 `install_init`
+> 提前去 `mkdir` 还没建好的 `$TRIM_PKGVAR` 并写文件，`mkdir` 的失败被 `2>/dev/null` 吞掉，
+> 下一行硬写就直接退出非 0。现在 `install_init` 只做 python3 存在性检查；写 `python_path`
+> 交给 `install_callback`（那时目录已就绪），`cmd/main` 的 `pybin()` 还有 `command -v` 兜底。
+
+### v1.2.1 · 断流清单只盯最近 48 小时
 
 > **断流清单只盯最近 48 小时。**
 >

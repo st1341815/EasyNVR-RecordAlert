@@ -22,7 +22,7 @@
 
 import statistics
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import config as C
@@ -31,7 +31,17 @@ import monitor as M
 SEGMENT_GAP = 300          # 秒；> 5 分钟没新文件 = 断流（与状态页在线时长同口径）
 PIECE_DEFAULT = 60         # 秒；推断不出片段时长时的兜底
 MIN_GAP_REPORT = 300       # 秒；断流区间列表的最小长度
-GAP_LIMIT = 30             # 断流区间最多返回多少条
+GAP_LIMIT = 200            # 断流清单最多返回多少条（v1.2.1：30 → 200，筛完还有得看）
+GAP_WINDOW_SEC = 48 * 3600  # 断流清单的固定可见范围：最近 48 小时
+# 断流分档：(key, 上界秒, 文案)；上界 None = 无上限。区间左开右闭，
+# 正好 10:00 归「≤10 分钟」、正好 30:00 归「10–30 分钟」，不落两档。
+GAP_BUCKETS = (
+    ("le10", 600, "≤10 分钟"),
+    ("m10_30", 1800, "10–30 分钟"),
+    ("m30_60", 3600, "30 分钟–1 小时"),
+    ("gt60", None, "> 1 小时"),
+)
+GAP_BUCKET_LABELS = {k: lb for k, _, lb in GAP_BUCKETS}
 
 # range → (往今天之前回溯几天, 展示名)
 RANGES = {
@@ -80,6 +90,37 @@ def window_of(cfg, key=DEFAULT_RANGE, now=None):
         "date_dirs": [d.strftime("%Y%m%d") for d in days],
         "day_labels": [d.strftime("%Y-%m-%d") for d in days],
         "single_day": key in ("today", "yesterday"),
+    }
+
+
+def gap_window(cfg, now=None):
+    """断流清单的固定窗口：最近 48 小时（**不随页面的「今天 / 近 7 天」切换**）。
+
+    两个口径要分开看，别混：
+      · KPI 的「最长断流 / 断流段数」按页面选的时间范围算 —— 那是"这段时期里有多糟"；
+      · 下面这份清单固定 48 小时 —— 那是"眼下有什么要处理"，近 30 天视图里若攒了
+        几百条，最该看的今天那几条会被翻到最下面找不到。
+
+    窗口是**滚动**的（now − 48h → now），不是从某个整点起算：否则同一段断流会随
+    时间流逝在清单里"跳进跳出"。日期目录取窗口首日到今日（跨 3 天）。
+    """
+    tz = M.get_tz(cfg)
+    now_dt = now or M.now_dt(cfg)
+    now_dt = now_dt.replace(tzinfo=tz) if now_dt.tzinfo is None else now_dt.astimezone(tz)
+    end = int(now_dt.timestamp())
+    start = end - GAP_WINDOW_SEC
+    first = datetime.fromtimestamp(start, tz).replace(hour=0, minute=0, second=0,
+                                                      microsecond=0)
+    last = now_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    days, d = [], first
+    while d <= last:
+        days.append(d.strftime("%Y%m%d"))
+        d += timedelta(days=1)
+    return {
+        "start": start, "end": end,
+        "date_dirs": days,
+        "start_str": M.fmt_ts(cfg, start), "end_str": M.fmt_ts(cfg, end),
+        "label": "最近 48 小时",
     }
 
 
@@ -245,6 +286,51 @@ def gaps_of(mts, start, end, min_gap=MIN_GAP_REPORT):
     return out
 
 
+def gap_bucket_of(dur_sec):
+    """断流时长 → 档位 key（见 GAP_BUCKETS）。"""
+    for key, upper, _ in GAP_BUCKETS:
+        if upper is None or dur_sec <= upper:
+            return key
+    return GAP_BUCKETS[-1][0]
+
+
+def _last_date_dir(base):
+    """通道目录里最新的录像日期（YYYYMMDD 字符串），没有日期分层返回空串。
+
+    只列目录名，不读文件 —— 用途只有一个：判断"这个通道以前录过没有"。
+    """
+    layout, parents = channel_layout(base)
+    last = ""
+    for p in parents:
+        for sub in M._subdirs(p):
+            name = sub.name
+            if M.DATE_RE.match(name) and name[:8] > last:
+                last = name[:8]
+    return last
+
+
+def gaps_recent(cfg, base, exts, win, now_ts, min_gap=MIN_GAP_REPORT):
+    """48 小时窗口内的断流区间，**含「整个窗口都没录像」这一种**。
+
+    前半段直接复用 gaps_of 的口径，但 gap_of 刻意没管一个情况：窗口内一个文件都没有。
+    gaps_of 拿不到 mts 就返回空，于是"前天下午录完就再没动过"的通道会从清单里消失
+    —— 而这恰恰是最该看见的那一条。判据是通道里存在早于窗口起点的录像日期，
+    就记一条 (窗口起点 → 现在)。从没录过（目录是空的）不算，那是"没装/没开录像"，
+    归状态页的 missing，不该混进断流清单冒充故障。
+    """
+    mts = channel_mtimes(base, exts, win["date_dirs"], now_ts)
+    if mts is None:                       # 通道目录不存在
+        return []
+    in_win = [m for m in mts if win["start"] <= m <= win["end"]]
+    if in_win:
+        return gaps_of(in_win, win["start"], win["end"], min_gap)
+    first_day = datetime.fromtimestamp(win["start"], M.get_tz(cfg)).strftime("%Y%m%d")
+    last_day = _last_date_dir(base)
+    if last_day and last_day < first_day:
+        return [(win["start"], win["end"])]
+    return []
+
+
 # ---------------------------------------------------------------- 汇总
 
 def build(cfg, range_key=DEFAULT_RANGE, now=None):
@@ -365,17 +451,33 @@ def build(cfg, range_key=DEFAULT_RANGE, now=None):
         r.pop("segments", None)
         r.pop("_mts", None)
 
-    # ---- 断流区间（跨通道合并，按结束时间倒序）----
+    # ---- 断流区间清单：固定最近 48 小时（与上面 KPI 的口径分开）----
+    gwin = gap_window(cfg, now=now)
     gap_items = []
-    for r in rows:
-        for s, e in r["gaps"]:
-            gap_items.append({"channel": r["channel"], "label": r["label"],
-                              "from": int(s), "to": int(e), "minutes": (e - s) // 60,
-                              "dur_str": M.fmt_duration(e - s),
+    for ch in chans:
+        for s, e in gaps_recent(cfg, ch["path"], exts, gwin, now_ts):
+            dur = int(e - s)
+            bk = gap_bucket_of(dur)
+            gap_items.append({"channel": ch["channel"],
+                              "label": ch["label"] or ch["channel"],
+                              "from": int(s), "to": int(e),
+                              "dur_sec": dur, "minutes": dur // 60,
+                              "bucket": bk,
+                              "bucket_label": GAP_BUCKET_LABELS.get(bk, ""),
+                              "dur_str": M.fmt_duration(dur),
                               "from_str": M.fmt_ts(cfg, s), "to_str": M.fmt_ts(cfg, e)})
     gap_items.sort(key=lambda g: g["to"], reverse=True)
-    gap_total = len(gap_items)
-    longest_gap = max((g["minutes"] for g in gap_items), default=0)
+    gap_counts = {"all": len(gap_items)}
+    for key, _, _ in GAP_BUCKETS:
+        gap_counts[key] = 0
+    for g in gap_items:
+        gap_counts[g["bucket"]] = gap_counts.get(g["bucket"], 0) + 1
+
+    # KPI 的「最长断流」仍按页面选的时间范围算 —— 那是「这段时期有多糟」，
+    # 和上面这份「眼下 48 小时」的清单不是一回事，别拿一个当另一个。
+    range_gaps = [g for r in rows for g in r["gaps"]]
+    range_gap_total = len(range_gaps)
+    longest_gap = max((int(e - s) // 60 for s, e in range_gaps), default=0)
 
     result["channels"] = [{
         "channel": r["channel"], "label": r["label"], "missing": r["missing"],
@@ -391,7 +493,16 @@ def build(cfg, range_key=DEFAULT_RANGE, now=None):
     result["bars"] = bars
     result["heat"] = heat
     result["gaps"] = gap_items[:GAP_LIMIT]
-    result["gap_total"] = gap_total
+    result["gap_total"] = gap_counts["all"]
+    result["gap_truncated"] = gap_counts["all"] > GAP_LIMIT
+    result["gap_window"] = {
+        "start": int(gwin["start"]), "end": int(gwin["end"]),
+        "start_str": M.fmt_ts(cfg, gwin["start"]), "end_str": M.fmt_ts(cfg, gwin["end"]),
+        "label": gwin["label"],
+    }
+    result["gap_buckets"] = (
+        [{"key": "all", "label": "全部", "count": gap_counts["all"]}] +
+        [{"key": k, "label": lb, "count": gap_counts[k]} for k, _, lb in GAP_BUCKETS])
     result["summary"] = {
         "channels": len(rows),
         "files": sum(r["files"] for r in rows),
@@ -401,7 +512,7 @@ def build(cfg, range_key=DEFAULT_RANGE, now=None):
         "longest_online_sec": int(max((r["longest_sec"] for r in rows), default=0)),
         "longest_gap_min": int(longest_gap),
         "longest_gap_str": M.fmt_duration(longest_gap * 60) if longest_gap else "无",
-        "gap_total": gap_total,
+        "gap_total": range_gap_total,
         "missing_channels": sum(1 for r in rows if r["missing"]),
         "online_str": M.fmt_duration(total_online // n_ch),
         "idle_str": M.fmt_duration(max(0, span - total_online // n_ch)),

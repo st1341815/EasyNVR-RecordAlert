@@ -892,14 +892,57 @@ def test_stats():
         eq(sum(b["files"] for b in r["bars"]), 180, "统计：柱状图文件数与总数一致")
         eq(sum(b["files"] for b in r["bars"]), 180, "统计：柱状图文件数按同一套桶归集")
 
-        # 断流：最后一个文件是 1:59、下一个是 3:00 → 61 分钟（按文件到文件算，不补片段）
-        one_hour = [g for g in r["gaps"] if g["minutes"] == 61]
-        eq(len(one_hour), 1, "统计：识别出那段 1 小时断流（61 分钟）")
-        eq(one_hour[0]["from"], ts0 + 60 * 119, "统计：断流起点 = 段尾最后一个文件")
-        eq(one_hour[0]["to"], ts0 + 3600 * 3, "统计：断流终点 = 下一段第一个文件")
-        ok("小时" in one_hour[0]["dur_str"], "统计：断流时长带可读文案",
-           one_hour[0]["dur_str"])
-        eq(r["gap_total"], len(r["gaps"]), "统计：gap_total 与实际条数一致（未截断时）")
+        # 断流清单固定最近 48 小时（v1.2.1 起）。上面这份数据录在 3 天前、之后再没动过，
+        # 所以清单里应当正好是一条「整窗都没录像」—— 这正是最该被看见的那种情况
+        # （gaps_of 拿不到窗口内文件会返回空，gaps_recent 补的就是这个洞）。
+        eq(len(r["gaps"]), 1, "统计：整窗无录像的通道在清单里报一条")
+        eq(r["gaps"][0]["from"], r["gap_window"]["start"],
+           "统计：整窗无录像的起点 = 窗口起点")
+        eq(r["gaps"][0]["to"], r["gap_window"]["end"],
+           "统计：整窗无录像的终点 = 窗口终点")
+        eq(r["gaps"][0]["bucket"], "gt60", "统计：整窗无录像归「> 1 小时」档")
+        eq(r["gap_total"], 1, "统计：gap_total 是清单自己的条数")
+        eq(r["gap_window"]["end"] - r["gap_window"]["start"], S.GAP_WINDOW_SEC,
+           "统计：清单窗口 = 48 小时")
+        eq(r["gap_buckets"][0]["count"], 1, "统计：全部档计数 = 清单条数")
+        # KPI 仍按页面范围算：中间那段 61 分钟 + 「最后一个文件 → 7 天窗口终点」各一条
+        eq(r["summary"]["gap_total"], 2, "统计：KPI 断流段数仍按页面范围算，与清单分开")
+        ok(r["summary"]["longest_gap_min"] > 60 * 24,
+           "统计：KPI 最长断流能跨天（清单只看 48 小时，不背这个包袱）")
+
+        # 把同样的 61 分钟断流挪进窗口里：起止、档位、文案都要对得上
+        root_w = tempfile.mkdtemp(prefix="erm-stats-w-")
+        try:
+            nowts = int(M.now_dt(cfg).timestamp())
+            wcam = "STATCAM00002"
+            a0 = nowts - 5 * 3600                 # A 段：now-5h → now-4h30 连录
+            tail = a0 + 60 * 30
+            b0 = tail + 61 * 60                   # 断 61 分钟后 B 段开始
+            marks_w = ([a0 + 60 * i for i in range(31)] +
+                       [b0 + 60 * i for i in range(int((nowts - 60 - b0) / 60) + 1)])
+            for t in marks_w:
+                ds = datetime.fromtimestamp(t, M.get_tz(cfg)).strftime("%Y%m%d")
+                dd = os.path.join(root_w, wcam, "profile_1", ds)
+                os.makedirs(dd, exist_ok=True)
+                fp = os.path.join(dd, "%d.mp4" % t)
+                with open(fp, "wb") as f:
+                    f.write(b"\0")
+                os.utime(fp, (t, t))
+            S.clear_cache()
+            cfgw = C.normalize({"record_root": root_w, "timezone": "Asia/Shanghai"})
+            rw = S.build(cfgw, "7d", now=M.now_dt(cfgw))
+            eq(len(rw["gaps"]), 1, "统计：48 小时内的断流进清单（且只有那一条）")
+            gw = rw["gaps"][0]
+            eq(gw["from"], tail, "统计：断流起点 = 段尾最后一个文件")
+            eq(gw["to"], b0, "统计：断流终点 = 下一段第一个文件")
+            eq(gw["dur_sec"], 61 * 60, "统计：断流时长按文件到文件算")
+            ok("小时" in gw["dur_str"], "统计：断流时长带可读文案", gw["dur_str"])
+            eq(gw["bucket"], "gt60", "统计：61 分钟归「> 1 小时」档")
+            eq(gw["bucket_label"], "> 1 小时", "统计：档位带展示文案")
+            eq(rw["gap_buckets"][-1]["count"], 1, "统计：gt60 档计数 = 1")
+            eq(rw["gap_buckets"][0]["count"], 1, "统计：全部档计数 = 清单条数")
+        finally:
+            shutil.rmtree(root_w, ignore_errors=True)
 
         # 单日视图：把"现在"挪到当天 12:00
         r2 = S.build(cfg, "today", now=base_day.replace(hour=12))

@@ -254,6 +254,23 @@
   .gaprow .gmin{flex:0 0 auto;color:var(--danger);font-variant-numeric:tabular-nums;
                 white-space:nowrap}
 
+  /* ---------- 断流清单：固定最近 48 小时 + 时长档位筛选 ---------- */
+  .gapwrap .gwin{display:flex;gap:10px;align-items:baseline;justify-content:space-between;
+                 flex-wrap:wrap;margin-bottom:7px}
+  .gapwrap .gwin .tag{font-size:12px;color:var(--muted);white-space:nowrap;
+                      font-variant-numeric:tabular-nums}
+  .gapwrap .gchips{display:flex;gap:6px;flex-wrap:wrap}
+  .gapwrap .gchips button{font:inherit;font-size:12px;line-height:1.5;padding:2px 9px;
+                          border-radius:999px;border:1px solid var(--line);
+                          background:transparent;color:var(--muted);cursor:pointer;
+                          white-space:nowrap}
+  .gapwrap .gchips button.on{background:var(--brand);border-color:var(--brand);
+                             color:#fff}
+  .gapwrap .gchips button .c{margin-left:5px;opacity:.72;
+                             font-variant-numeric:tabular-nums}
+  .gaprow .gsev{flex:0 0 auto;font-size:11px;line-height:1.5;padding:0 6px;
+                border-radius:4px;white-space:nowrap}
+
   /* ---------- 数据入场动画（切页 / 切区间时播放，15 秒轮询不重播） ---------- */
   .anim .bar i{animation:barGrow .55s cubic-bezier(.2,.8,.3,1) both}
   .anim .kpi{animation:kpiIn .38s cubic-bezier(.2,.8,.3,1) both}
@@ -1610,20 +1627,75 @@ function chanBars(list){
   }).join('');
 }
 
+/* 断流清单：固定看最近 48 小时（后端 GAP_WINDOW_SEC 写死），
+   和页面上方按范围统计的 KPI 是两套口径 —— 巡检要的是「现在有没有在录」，
+   不是「这 30 天平均好不好看」。档位筛选纯前端做，后端一次给够 200 条。 */
+let GAP_FILTER = 'all';
+
+function gapSev(key){
+  switch (key) {
+    case 'gt60':   return ['#b4553f', 'rgba(180,85,63,.10)'];
+    case 'm30_60': return ['#c58a2b', 'rgba(197,138,43,.10)'];
+    case 'm10_30': return ['#7a6a2b', 'rgba(122,106,43,.10)'];
+    default:       return ['var(--muted)', 'rgba(0,0,0,.045)'];
+  }
+}
+
+function gapFilter(btn){
+  GAP_FILTER = btn.dataset.key || 'all';
+  const box = $('statGaps');
+  box.querySelectorAll('.gchips button').forEach(b =>
+    b.classList.toggle('on', b.dataset.key === GAP_FILTER));
+  let shown = 0;
+  box.querySelectorAll('.gaprow').forEach(r => {
+    const hit = (GAP_FILTER === 'all') || r.dataset.bucket === GAP_FILTER;
+    r.style.display = hit ? '' : 'none';
+    if (hit) shown++;
+  });
+  const none = box.querySelector('.gempty');
+  if (none) none.style.display = shown ? 'none' : '';
+}
+
 function gapList(d){
-  const gs = d.gaps || [];
-  if (!gs.length) {
-    return '<div class="empty">窗口内没有断流：相邻录像的间隔都没超过 5 分钟</div>';
+  const w = d.gap_window || {};
+  const all = d.gaps || [];
+  const bs = d.gap_buckets || [];
+  const winTag = ((w.label || '最近 48 小时') + '　' +
+    (w.start_str ? String(w.start_str).slice(5, 16) + ' → ' +
+                   String(w.end_str).slice(5, 16) : '')).trim();
+  let h = '<div class="gapwrap">' +
+    '<div class="gwin"><span class="tag">' + esc(winTag) + '</span>' +
+    '<span class="tag">间隔超过 5 分钟才算一段</span></div>';
+  if (!bs.length) return h + '<div class="empty">没有数据</div></div>';
+
+  h += '<div class="gchips">' + bs.map(b =>
+    '<button type="button" data-key="' + esc(b.key) + '"' +
+    (b.key === GAP_FILTER ? ' class="on"' : '') +
+    ' onclick="gapFilter(this)">' + esc(b.label) +
+    '<span class="c">' + (b.count || 0) + '</span></button>').join('') + '</div>';
+
+  if (!all.length) {
+    return h + '<div class="empty">这 48 小时没有断流：所有通道都在按时录像</div></div>';
   }
-  let h = gs.map(g =>
-    '<div class="gaprow"><span class="gname">' + esc(g.label) + '</span>' +
-    '<span class="gtime">' + esc(g.from_str) + ' → ' + esc(g.to_str) + '</span>' +
-    '<span class="gmin">' + esc(g.dur_str) + '</span></div>').join('');
-  if ((d.gap_total || 0) > gs.length) {
-    h += '<div class="hint">共 ' + d.gap_total + ' 段，这里只列最近 ' + gs.length + ' 段' +
-         '（换更小的范围可以看全）</div>';
+
+  h += all.map(g => {
+    const sev = gapSev(g.bucket);
+    const hidden = (GAP_FILTER !== 'all' && g.bucket !== GAP_FILTER)
+                 ? ' style="display:none"' : '';
+    return '<div class="gaprow" data-bucket="' + esc(g.bucket) + '"' + hidden + '>' +
+      '<span class="gname">' + esc(g.label) + '</span>' +
+      '<span class="gsev" style="color:' + sev[0] + ';background:' + sev[1] + '">' +
+        esc(g.bucket_label || '') + '</span>' +
+      '<span class="gtime">' + esc(g.from_str) + ' → ' + esc(g.to_str) + '</span>' +
+      '<span class="gmin">' + esc(g.dur_str) + '</span></div>';
+  }).join('');
+
+  h += '<div class="empty gempty">这个档位下没有记录</div>';
+  if (d.gap_truncated) {
+    h += '<div class="hint">共 ' + (d.gap_total || 0) + ' 段，只列最近 ' +
+         all.length + ' 段</div>';
   }
-  return h;
+  return h + '</div>';
 }
 
 function renderStats(d){

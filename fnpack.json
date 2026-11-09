@@ -29,8 +29,30 @@
       "install_type": "",
       "is_docker": false,
       "service_port": "",
-      "details_updated_at": "2026-11-08T14:35:00+08:00",
+      "details_updated_at": "2026-11-09T10:00:00+08:00",
       "releases": {
+        "1.2.3": {
+          "changelog": "断流清单超过 50 行自动折叠（只动展示层，筛选仍是纯前端）：通道多、网络抖的夜里「全部」档能一口气铺两百行，把 KPI、柱状图和热力图全推出屏幕。现在命中行数 > 50 时只铺前 50 段，列表底部一条折叠栏显示「已显示前 50 段，N 段已折叠」并可一键展开/收起，≤ 50 段时折叠栏整体不出现；筛选与折叠合并到单一出口 applyGapView()，换档位重置为折叠态，15 秒轮询重建后展开态保持。后端 selftest 459 项、前端 render_gaps 43 项全通过。",
+          "updated_at": "2026-11-09T09:43:00+08:00",
+          "packages": {
+            "all": {
+              "download_url": "https://github.com/st1341815/EasyNVR-RecordAlert/releases/download/v1.2.3/EasyNVR-RecordAlert-1.2.3.fpk",
+              "sha256": "ee7d8fe47035436a4653e656ff377610ca13f7bbb6121fe1ffecdc51837fcff2",
+              "size": 120472
+            }
+          }
+        },
+        "1.2.0": {
+          "changelog": "新增源端服务巡检：以前所有判断的落点都是「磁盘上有没有新文件」，可 EasyNVR 自己挂了或授权过期时，表现和「家里没人、画面静止」一模一样——所有通道一起安静。现在走无需凭据的 GET /health 分五档判定（unreachable 服务不可达 / expired 授权已过期 / bad_status 服务异常 / degraded / ok），同一时刻只落一档，异常档推送告警，状态页同步展示上游版本与授权到期时间。",
+          "updated_at": "2026-11-08T16:13:00+08:00",
+          "packages": {
+            "all": {
+              "download_url": "https://github.com/st1341815/EasyNVR-RecordAlert/releases/download/v1.2.0/EasyNVR-RecordAlert-1.2.0.fpk",
+              "sha256": "ee0b5451ca603f9a92c8a20d910abf490616a79decf2f347353c45251003e2f4",
+              "size": 115814
+            }
+          }
+        },
         "1.1.9": {
           "changelog": "日志独立成页（只动界面，日志接口与写日志逻辑没动）：原来日志是配置页里一块 display:none 的卡片，要点「查看日志」才展开；排查「为什么没收到通知」第一件事就是看日志，藏在配置页里每查一次多两下点击，卡片还把配置页越堆越长。现做成顶栏第四个页签「日志」，排在备份之后；配置页删掉「查看日志」按钮与隐藏卡片，操作按钮从六颗回到五颗不再换行。行数可选 200/500/1000/2000（默认 500，换档立即重读，只读尾部）；进入本页才读一次、之后不自动刷新（15 秒重画会把阅读位置顶回顶部）；版面与另三页同宽 1080，日志框高度跟随视口 clamp(320px,100vh-290px,880px)、长行折行不横向拖。自检 415 项。",
           "updated_at": "2026-11-08T14:35:00+08:00",

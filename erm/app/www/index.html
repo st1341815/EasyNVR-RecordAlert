@@ -270,6 +270,16 @@
                              font-variant-numeric:tabular-nums}
   .gaprow .gsev{flex:0 0 auto;font-size:11px;line-height:1.5;padding:0 6px;
                 border-radius:4px;white-space:nowrap}
+  /* 超过 50 行自动折叠：底部一条「还有 N 段」+ 展开按钮 */
+  .gapwrap .gmore{display:flex;gap:10px;align-items:center;justify-content:space-between;
+                  flex-wrap:wrap;margin-top:8px;padding-top:8px;
+                  border-top:1px dashed var(--line);font-size:12px;color:var(--muted)}
+  .gapwrap .gmore .gmore-txt{white-space:nowrap;font-variant-numeric:tabular-nums}
+  .gapwrap .gmore button{font:inherit;font-size:12px;line-height:1.5;padding:3px 12px;
+                         border-radius:999px;border:1px solid var(--line);
+                         background:transparent;color:var(--brand);cursor:pointer;
+                         white-space:nowrap}
+  .gapwrap .gmore button:hover{background:var(--hover)}
 
   /* ---------- 数据入场动画（切页 / 切区间时播放，15 秒轮询不重播） ---------- */
   .anim .bar i{animation:barGrow .55s cubic-bezier(.2,.8,.3,1) both}
@@ -1641,19 +1651,53 @@ function gapSev(key){
   }
 }
 
+/* 折叠：清单默认只铺 GAP_MAX_ROWS 行，多出来的先收起来，点一下展开。
+   巡检要看的是「眼下有没有在录」，200 条全铺开既滚不完也看不出重点。
+   筛选与折叠共用 applyGapView 这一个出口，两套 display 不会互相踩。 */
+const GAP_MAX_ROWS = 50;
+let GAP_EXPAND = false;
+
+function applyGapView(){
+  const box = $('statGaps');
+  if (!box) return;
+  const rows = Array.from(box.querySelectorAll('.gaprow'));
+  if (!rows.length) return;
+  const hit = rows.filter(r => GAP_FILTER === 'all' || r.dataset.bucket === GAP_FILTER);
+  const over = hit.length > GAP_MAX_ROWS;
+  const shown = (over && !GAP_EXPAND) ? GAP_MAX_ROWS : hit.length;
+
+  rows.forEach(r => { r.style.display = 'none'; });
+  hit.slice(0, shown).forEach(r => { r.style.display = ''; });
+
+  const none = box.querySelector('.gempty');
+  if (none) none.style.display = hit.length ? 'none' : '';
+
+  const more = box.querySelector('.gmore');
+  if (more) {
+    more.style.display = over ? '' : 'none';
+    if (over) {
+      const rest = hit.length - GAP_MAX_ROWS;
+      more.querySelector('.gmore-txt').textContent = GAP_EXPAND
+        ? '已展开全部 ' + hit.length + ' 段'
+        : '已显示前 ' + GAP_MAX_ROWS + ' 段，' + rest + ' 段已折叠';
+      more.querySelector('button').textContent = GAP_EXPAND
+        ? '收起' : '展开剩余 ' + rest + ' 段';
+    }
+  }
+}
+
 function gapFilter(btn){
   GAP_FILTER = btn.dataset.key || 'all';
+  GAP_EXPAND = false;                 /* 换档位就回到折叠态，视角不飘 */
   const box = $('statGaps');
   box.querySelectorAll('.gchips button').forEach(b =>
     b.classList.toggle('on', b.dataset.key === GAP_FILTER));
-  let shown = 0;
-  box.querySelectorAll('.gaprow').forEach(r => {
-    const hit = (GAP_FILTER === 'all') || r.dataset.bucket === GAP_FILTER;
-    r.style.display = hit ? '' : 'none';
-    if (hit) shown++;
-  });
-  const none = box.querySelector('.gempty');
-  if (none) none.style.display = shown ? 'none' : '';
+  applyGapView();
+}
+
+function gapToggle(){
+  GAP_EXPAND = !GAP_EXPAND;
+  applyGapView();
 }
 
 function gapList(d){
@@ -1680,9 +1724,7 @@ function gapList(d){
 
   h += all.map(g => {
     const sev = gapSev(g.bucket);
-    const hidden = (GAP_FILTER !== 'all' && g.bucket !== GAP_FILTER)
-                 ? ' style="display:none"' : '';
-    return '<div class="gaprow" data-bucket="' + esc(g.bucket) + '"' + hidden + '>' +
+    return '<div class="gaprow" data-bucket="' + esc(g.bucket) + '">' +
       '<span class="gname">' + esc(g.label) + '</span>' +
       '<span class="gsev" style="color:' + sev[0] + ';background:' + sev[1] + '">' +
         esc(g.bucket_label || '') + '</span>' +
@@ -1691,6 +1733,9 @@ function gapList(d){
   }).join('');
 
   h += '<div class="empty gempty">这个档位下没有记录</div>';
+  h += '<div class="gmore" style="display:none">' +
+       '<span class="gmore-txt"></span>' +
+       '<button type="button" onclick="gapToggle()">展开</button></div>';
   if (d.gap_truncated) {
     h += '<div class="hint">共 ' + (d.gap_total || 0) + ' 段，只列最近 ' +
          all.length + ' 段</div>';
@@ -1729,6 +1774,7 @@ function renderStats(d){
   $('statHeat').innerHTML = heatTable(d.heat);
   $('statChans').innerHTML = chanBars(d.channels || []);
   $('statGaps').innerHTML = gapList(d);
+  applyGapView();                     /* 折叠加筛选，统一在这里收口 */
 }
 
 /* 数据入场动画：切页 / 切区间才播，15 秒轮询不重播 */

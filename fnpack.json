@@ -29,8 +29,19 @@
       "install_type": "",
       "is_docker": false,
       "service_port": "",
-      "details_updated_at": "2026-11-09T10:00:00+08:00",
+      "details_updated_at": "2026-11-11T09:39:00+08:00",
       "releases": {
+        "1.2.4": {
+          "changelog": "日志改为按时间倒序（最新在最上）：原来日志页沿用文件原样，尾部 N 行按写入顺序铺进 pre，最新一条压在最底下，而 pre 的滚动位置默认在顶部——打开日志页第一眼永远落在几百行之前，想看刚才那一下报了什么得先滚到底。现在后端 tail_log 按「记录」为单位倒排：用行首 YYYY-MM-DD HH:MM:SS 切块、反转块序、块内顺序原样保留（逐行 [::-1] 会把异常栈翻成栈顶在下，比正序更难读）；行数口径不变，从文件末尾往前整块收，n 比单条记录还小时至少给完整一条，需要原文时传 reverse=False。前端读完 scrollTop 归零，并在页面上注明倒序口径。自检 459 → 473 项。",
+          "updated_at": "2026-11-11T09:39:00+08:00",
+          "packages": {
+            "all": {
+              "download_url": "https://github.com/st1341815/EasyNVR-RecordAlert/releases/download/v1.2.4/EasyNVR-RecordAlert-1.2.4.fpk",
+              "sha256": "4803a7314fcdcd8241401428f5a48e1bd8ad47204f99b0b597673463ffac2d9c",
+              "size": 121905
+            }
+          }
+        },
         "1.2.3": {
           "changelog": "断流清单超过 50 行自动折叠（只动展示层，筛选仍是纯前端）：通道多、网络抖的夜里「全部」档能一口气铺两百行，把 KPI、柱状图和热力图全推出屏幕。现在命中行数 > 50 时只铺前 50 段，列表底部一条折叠栏显示「已显示前 50 段，N 段已折叠」并可一键展开/收起，≤ 50 段时折叠栏整体不出现；筛选与折叠合并到单一出口 applyGapView()，换档位重置为折叠态，15 秒轮询重建后展开态保持。后端 selftest 459 项、前端 render_gaps 43 项全通过。",
           "updated_at": "2026-11-09T09:43:00+08:00",

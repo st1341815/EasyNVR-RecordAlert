@@ -18,6 +18,7 @@
 import fcntl
 import json
 import os
+import re
 import signal
 import socket
 import socketserver
@@ -30,7 +31,7 @@ from urllib.parse import parse_qs, urlparse
 
 APP_NAME = "erm"
 GATEWAY_PREFIX = "/app/" + APP_NAME
-VERSION = "1.2.3"
+VERSION = "1.2.4"
 # 请求体上限：导入备份是唯一的大请求（备份文件正常十几 KB）。
 # 超限在读完之前就拒绝，别把几百 MB 先读进内存再报错。
 MAX_BODY_BYTES = 12 * 1024 * 1024
@@ -467,16 +468,53 @@ def handle_action(body, query):
     return {"ok": False, "error": "未知动作：%s" % act}
 
 
-def tail_log(n=120):
+def tail_log(n=120, reverse=True):
+    """取最近 n 行日志。reverse=True 时按时间倒序返回（最新记录排在最上面）。
+
+    为什么不直接 lines[-n:][::-1]：
+      一条日志记录的第一行以 "2024-01-01 12:00:00" 开头（Formatter 的 asctime），
+      而异常栈、被折行的长消息这类续行不以时间戳开头。逐行反转会把栈顶翻到最底下，
+      读起来比正序还乱。所以按「记录」为单位反转：先按时间戳切块，反转块序，
+      块内部仍保持写入顺序。
+
+    条数口径仍是「行」：从文件末尾往前收整块，累计行数达到 n 就停（至少给一块），
+    这样 n 很小时也不会把一条记录截成半条。
+    """
     p = C.LOG_DIR / "monitor.log"
     try:
         with open(p, "r", encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
-        return "".join(lines[-n:])
     except FileNotFoundError:
         return "（日志尚未生成）"
     except Exception as e:
         return "读取日志失败：%s" % e
+    if not lines:
+        return ""
+    if not reverse:
+        return "".join(lines[-n:])
+    blocks = _split_log_blocks(lines)
+    out, cnt = [], 0
+    for blk in reversed(blocks):
+        if out and cnt + len(blk) > n:
+            break
+        out.append("".join(blk))
+        cnt += len(blk)
+    return "".join(out)
+
+
+# 日志记录起点：logging.Formatter("%(asctime)s ...") 的行首时间戳
+LOG_TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
+
+
+def _split_log_blocks(lines):
+    """按时间戳把行切成「记录」块；文件首行残缺（轮转残留）也自成一块。"""
+    blocks = []
+    for ln in lines:
+        if LOG_TS_RE.match(ln) or not blocks:
+            blocks.append([ln])
+        else:
+            blocks[-1].append(ln)
+    return blocks
 
 
 def doctor_payload():

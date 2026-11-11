@@ -1199,6 +1199,53 @@ def test_ui_shell():
     ok("if (name === 'log') loadLogs();" in html, "UI：切到日志页才读日志（不占其它页开销）")
     ok("$('logLines').onchange = loadLogs;" in html, "UI：日志行数可切换（200~2000）")
 
+    # ⑤ v1.2.4：日志按时间倒序（最新在最上），读完回顶
+    ok("按时间倒序" in html, "UI：日志页注明倒序口径")
+    ok("box.scrollTop = 0;" in html, "UI：读完日志回到顶部（最新那条可见）")
+
+
+def test_log_reverse():
+    """v1.2.4：日志倒序 —— 最新记录排最上，多行异常整体倒排（栈内不乱）。"""
+    import server as SV
+    from pathlib import Path
+
+    C.LOG_DIR.mkdir(parents=True, exist_ok=True)
+    p = Path(str(C.LOG_DIR)) / "monitor.log"
+    p.write_text(
+        "2026-01-01 10:00:00 [INFO] 第一条\n"
+        "2026-01-01 10:05:00 [ERROR] 第二条\n"
+        "Traceback (most recent call last):\n"
+        '  File "x.py", line 1, in <module>\n'
+        "ValueError: boom\n"
+        "2026-01-01 10:10:00 [INFO] 第三条\n",
+        encoding="utf-8")
+
+    ln = SV.tail_log(1000).splitlines()
+    eq(len(ln), 6, "倒序：行数不变，一行不丢")
+    eq(ln[0], "2026-01-01 10:10:00 [INFO] 第三条", "倒序：最新记录在第一行")
+    eq(ln[1], "2026-01-01 10:05:00 [ERROR] 第二条", "倒序：次新记录紧随其后")
+    eq(ln[2], "Traceback (most recent call last):", "倒序：异常栈首行仍跟在自己的记录头下面")
+    eq(ln[3], '  File "x.py", line 1, in <module>', "倒序：栈内顺序保持原样")
+    eq(ln[4], "ValueError: boom", "倒序：栈尾没被翻到栈顶（逐行反转会犯的错）")
+    eq(ln[5], "2026-01-01 10:00:00 [INFO] 第一条", "倒序：最老记录在最后")
+
+    # 正序开关保留（导出/贴日志时仍可能要原文）
+    eq(SV.tail_log(1000, reverse=False).splitlines()[0],
+       "2026-01-01 10:00:00 [INFO] 第一条", "reverse=False 仍按时间正序")
+
+    # 条数按「行」算，但以记录为单位收：小 n 不会把一条记录截成半条
+    eq(SV.tail_log(1).strip(), "2026-01-01 10:10:00 [INFO] 第三条",
+       "n=1 时至少给一条完整记录")
+    eq(len(SV.tail_log(3).splitlines()), 1,
+       "n=3 收不下第二条（4 行）就不硬塞")
+
+    # 空文件 / 缺文件都不炸
+    p.write_text("", encoding="utf-8")
+    eq(SV.tail_log(10), "", "空日志返回空串")
+    p.unlink()
+    ok("日志尚未生成" in SV.tail_log(10), "无日志文件时给提示而不是抛异常")
+    p.write_text("", encoding="utf-8")     # 还原，别给后续用例留个已删除的路径
+
 
 def test_backup():
     """备份（v1.1.0）：落盘、列表、按份数清理、恢复、拒绝路径穿越、定时到点判定。"""
@@ -1474,7 +1521,8 @@ def main():
                    test_record_mode, test_easynvr_layout, test_online_streak,
                    test_scan_alert_and_silence, test_daily_schedule, test_report_text,
                    test_push_plan_and_report_window, test_stats,
-                   test_normalize_keeps_secret, test_ui_shell, test_backup,
+                   test_normalize_keeps_secret, test_ui_shell, test_log_reverse,
+                   test_backup,
                    test_uninstall_wizard, test_nvr_health):
             fn()
         test_push(webhook)
